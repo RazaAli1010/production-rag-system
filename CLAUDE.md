@@ -6,6 +6,7 @@ retrieval → **refusal, not hallucination**. Users are Pakistani students on mo
 messy typo-ridden Urdu/English code-switched questions ("probation se kaise nikalta hoon").
 
 ## Core philosophy (do not violate)
+
 1. Build the **simplest working RAG first (F3)**, then add ONE enhancement at a time.
 2. Every enhancement (F5–F9, F17) ends with a **mandatory eval gate**: run the F4 harness,
    `--compare` the previous phase label, and commit a delta report to `docs/eval_results/`.
@@ -14,6 +15,7 @@ messy typo-ridden Urdu/English code-switched questions ("probation se kaise nika
    always work.
 
 ## Fixed tech stack (do NOT re-litigate in specs or code)
+
 - **Orchestration:** LangChain (LCEL chains, loaders, splitters, retrievers, callbacks).
 - **Backend:** FastAPI, Python 3.11+, Pydantic v2, fully async.
 - **Frontend:** React 18 + Vite + TypeScript, Tailwind, TanStack Query.
@@ -36,8 +38,10 @@ comparison, pgvector, second-LLM fallback, social login, email verification, web
 long-term cross-session memory.
 
 ## Async/await mandate (project-wide, CI-enforced)
+
 Every I/O path is async end-to-end. Inside `backend/app/` the **sync twins are BANNED**
 (ruff/grep CI check): no `invoke`, `embed_documents`, blocking `requests`, or sync `redis`.
+
 - HTTP → `httpx.AsyncClient`; files → `aiofiles`; Redis → `redis.asyncio`; DB → async
   SQLAlchemy + asyncpg.
 - LangChain only via its async surface: `ainvoke` / `astream` / `astream_events` /
@@ -49,6 +53,7 @@ Every I/O path is async end-to-end. Inside `backend/app/` the **sync twins are B
   spec must state which side of that line its work falls on.
 
 ## Repo structure (monorepo)
+
 ```
 campus-rag/
 ├── backend/app/
@@ -67,18 +72,22 @@ campus-rag/
 ```
 
 ## Build order & dependency graph (build in this order)
+
 ```
 PHASE A: F12 Persistence → F1 Ingestion → F2 Indexing → F3 Baseline RAG → F4 Eval harness
 PHASE B (each eval-gated): F5 Hybrid → F6 Reranking → F7 Query rewrite → F8 Compression
 PHASE C: F9 Semantic cache → F10 Auth → F17 Session memory → F11 API hardening → F13 Observability
 PHASE D: F14 Frontend → F15 Deploy/CI/load-test → F16 Telegram bot (optional)
 ```
+
 Within Phase B the build order IS the measurement order: each feature's "before" = the
 previous feature's "after". Build F12 FIRST — it blocks everything.
 
 ## Canonical data contracts (Pydantic — the cross-feature interface)
+
 `DocumentMeta`, `Chunk`, `RetrievedChunk` (dense/sparse/fused/rerank scores),
 `Citation` (quote ≤ 25 words), `ChatMessage`, `MemoryContext`, `StageEvent`, `AnswerResponse`.
+
 - **IDs:** chunk `{doc_id}:{chunk_seq}`; doc = slug+year (`hec-plagiarism-policy-2021`).
 - **Postgres tables (owned by F12, referenced by name elsewhere):** `users`, `api_keys`,
   `refresh_tokens`, `login_attempts`, `documents`, `chunks`, `sessions`, `messages`,
@@ -87,6 +96,7 @@ previous feature's "after". Build F12 FIRST — it blocks everything.
   `revoked_at IS NULL` and not expired.
 
 ## SSE contract (produced by F3, extended by F17, served by F11, rendered by F14)
+
 Ordered event types on `/api/ask`:
 `stage` (repeated, live pipeline status, Claude-style) → `token` (repeated) → `citations` →
 `meta` (final `AnswerResponse` sans answer text) → `done` | `error`.
@@ -95,6 +105,7 @@ stage may block the event loop**. Even the F3 baseline emits `stage` events so F
 no contract change — later features only add stages.
 
 ## Pipeline order (F11, sequence diagram required)
+
 validate → auth → rate limit → **load memory + summarize-if-flagged (F17)** → rewrite/condense
 (F7) → cache lookup (F9) → hybrid retrieve (F5) → rerank (F6) → refusal gate → compress (F8) →
 generate (F3 chain, `MemoryContext` in prompt) → cache write → persist assistant message
@@ -102,6 +113,7 @@ generate (F3 chain, `MemoryContext` in prompt) → cache write → persist assis
 events via the single F17 emitter (`app/memory/stages.py`).
 
 ## Settings (one Pydantic `Settings` class — every config value goes here)
+
 - Secrets/URLs: `OPENAI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX`, `DATABASE_URL`
   (Postgres, asyncpg), `REDIS_URL`, `JWT_SECRET`, `LANGFUSE_*`.
 - Feature flags: `ENABLE_HYBRID`, `ENABLE_RERANK`, `ENABLE_QUERY_REWRITE`,
@@ -111,7 +123,9 @@ events via the single F17 emitter (`app/memory/stages.py`).
   `MEMORY_SUMMARIZE_EVERY_PAIRS=3` (lazy-summary batch), `MEMORY_SUMMARY_MAX_TOKENS=600`.
 
 ## Session memory rule (F17 — sliding window + summarization hybrid)
+
 The prompt NEVER carries the full transcript. Prompt context per turn is always one of:
+
 - **≤5 pairs so far:** all pairs verbatim + current question.
 - **>5 pairs, under 50k:** rolling summary (of older pairs) + last 5 pairs + current question.
 - **over 50k budget:** rolling summary + last 2 pairs + current question (`summarized=true`).
@@ -124,12 +138,14 @@ follow-ups never poison the cache. Memory reads are O(window), not O(transcript)
 `asyncio.Lock` serializes concurrent asks → second request returns 409 `session_busy`.
 
 ## Eval-gate label sequence (fixed, used with `--compare`)
+
 `baseline` → `f5-hybrid-after` → `f6-rerank-after` → `f7-rewrite-after` →
 `f8-compression-after` → `f9-cache-after` → `f17-memory-after`
 (latency/cost suites only for the last two). Every README benchmark row maps to a label; every
 label maps to a git SHA + index manifest so all numbers are reproducible.
 
 ## Commands
+
 ```bash
 # DB / migrations
 make db-up && make migrate           # local docker Postgres + Redis, alembic upgrade head
@@ -153,6 +169,7 @@ docker compose up
 ```
 
 ## Non-negotiable rules
+
 - Don't change fixed stack decisions; respect each feature's "Out of scope" notes.
 - Every new config value lives in the central `Settings` class.
 - **Every schema change is an Alembic migration** — all DB access is async (asyncpg).
@@ -168,6 +185,7 @@ docker compose up
   definition of done.
 
 ## Spec generation (per feature, in `docs/specs/<feature>/`)
+
 Produce `requirements.md` (user stories + EARS acceptance criteria), `design.md` (module
 layout, LCEL composition, data-flow, error handling, new Settings keys, Alembic migrations,
 how it honors Shared Context contracts + the F3 retriever seam), and `tasks.md` (ordered
