@@ -10,6 +10,9 @@ def test_settings_loads_from_env(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost:5432/db")
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("PINECONE_API_KEY", "pc-test")
+    monkeypatch.setenv("PINECONE_INDEX", "campus-rag")
 
     s = Settings(_env_file=None)
 
@@ -22,6 +25,9 @@ def test_settings_defaults(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost:5432/db")
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("PINECONE_API_KEY", "pc-test")
+    monkeypatch.setenv("PINECONE_INDEX", "campus-rag")
 
     s = Settings(_env_file=None)
 

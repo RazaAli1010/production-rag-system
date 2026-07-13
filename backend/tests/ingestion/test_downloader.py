@@ -17,6 +17,9 @@ def _settings(**overrides) -> Settings:
         DATABASE_URL="postgresql+asyncpg://u:p@localhost:5432/db",
         ADMIN_EMAIL="admin@example.com",
         ADMIN_PASSWORD="secret",
+        OPENAI_API_KEY="sk-test",
+        PINECONE_API_KEY="pc-test",
+        PINECONE_INDEX="campus-rag",
         INGEST_MAX_RETRIES=3,
         INGEST_RATE_LIMIT_PER_SEC=50.0,  # fast by default; individual tests override
         INGEST_DOWNLOAD_TIMEOUT_S=5.0,

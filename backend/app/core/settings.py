@@ -7,6 +7,7 @@ F12's boot/tests don't require unrelated real credentials.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import EmailStr, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -52,6 +53,31 @@ class Settings(BaseSettings):
 
     # repo-root `docs/` (CLAUDE.md repo structure), relative to the `backend/` cwd (AC-32).
     INGESTION_REPORT_DIR: Path = Path("../docs")
+
+    # --- Chunking & Indexing (F2) ---
+    OPENAI_API_KEY: SecretStr
+    EMBED_MODEL: str = "text-embedding-3-small"
+    EMBED_DIM: int = 1536
+    EMBED_BATCH_SIZE: int = 100
+    EMBED_CONCURRENCY: int = 4
+    EMBED_MAX_RETRIES: int = 5
+    EMBED_MAX_CHUNK_TOKENS: int = 8000
+
+    PINECONE_API_KEY: SecretStr
+    PINECONE_INDEX: str
+    PINECONE_UPSERT_CONCURRENCY: int = 4
+    PINECONE_METADATA_MAX_BYTES: int = 40_000
+
+    INDEXING_STRATEGY: Literal["fixed", "structure"] = "fixed"
+    FIXED_CHUNK_TOKENS: int = 500
+    FIXED_CHUNK_OVERLAP: int = 50
+    STRUCTURE_MAX_SECTION_TOKENS: int = 800
+    STRUCTURE_CLAUSE_PATTERNS: list[str] = [
+        r"^\d+(\.\d+)*[.)]\s", r"^[A-Z][A-Z \-]{6,}$", r"Regulation No\.",
+    ]
+
+    BM25_PATH: Path = Path("app/data/bm25.pkl")
+    INDEX_MANIFEST_PATH: Path = Path("app/data/index_manifest.json")
 
 
 settings = Settings()

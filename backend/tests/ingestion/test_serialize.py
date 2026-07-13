@@ -16,6 +16,9 @@ def _settings(extracted_dir) -> Settings:
         DATABASE_URL="postgresql+asyncpg://u:p@localhost:5432/db",
         ADMIN_EMAIL="admin@example.com",
         ADMIN_PASSWORD="secret",
+        OPENAI_API_KEY="sk-test",
+        PINECONE_API_KEY="pc-test",
+        PINECONE_INDEX="campus-rag",
     )
     s.EXTRACTED_DIR = extracted_dir
     return s
