@@ -32,7 +32,7 @@ dependencies = [
     "pandas==2.3.3",  # xlsx row-wise iteration + fixture generation
     # ocrmypdf / libreoffice are external CLI binaries invoked via subprocess in the Docker
     # ingestion image (design.md §4) — not Python-importable deps, not installed here.
-    # --- chunking & indexing (F2) ---
+    # --- Chunking & Indexing (F2) ---
     "tiktoken==0.13.0",
     "rank-bm25==0.2.2",
     "langchain-text-splitters==1.1.2",

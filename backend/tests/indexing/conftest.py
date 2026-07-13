@@ -1,11 +1,3 @@
-"""Fixtures for F2 indexing tests.
-
-DB fixtures mirror `tests/ingestion/conftest.py` (own `engine`/`session` + the process-lifetime
-`get_engine`/`get_sessionmaker` `@lru_cache` reset — asyncpg connections are loop-bound and
-pytest-asyncio gives each test its own loop). Requires a live Postgres reachable at
-`DATABASE_URL` (same as `tests/db`).
-"""
-
 from pathlib import Path
 
 import pytest
@@ -49,7 +41,6 @@ async def session(engine):
 
 @pytest_asyncio.fixture(autouse=True)
 async def _cleanup_tables(engine):
-    """Truncate F2's tables after every test so committed rows never leak between tests."""
     yield
     from sqlalchemy import text
 
@@ -64,7 +55,6 @@ def fixtures_dir() -> Path:
 
 @pytest.fixture
 def tmp_index_dirs(tmp_path, monkeypatch):
-    """Point Settings' data/index paths at a scratch tmp_path so tests never touch real app/data."""
     data_dir = tmp_path / "data"
     extracted_dir = data_dir / "extracted"
     data_dir.mkdir(parents=True)

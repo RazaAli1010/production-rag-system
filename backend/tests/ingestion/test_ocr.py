@@ -15,9 +15,6 @@ def _settings(**overrides) -> Settings:
         DATABASE_URL="postgresql+asyncpg://u:p@localhost:5432/db",
         ADMIN_EMAIL="admin@example.com",
         ADMIN_PASSWORD="secret",
-        OPENAI_API_KEY="sk-test",
-        PINECONE_API_KEY="pc-test",
-        PINECONE_INDEX="campus-rag",
     )
     base.update(overrides)
     return Settings(_env_file=None, **base)
