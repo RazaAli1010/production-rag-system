@@ -130,3 +130,72 @@ jobs:
             exit 1
           fi
           ruff check app/ingestion
+
+  indexing:
+    name: F2 indexing — chunk/embed/upsert tests, async guard
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+      OPENAI_API_KEY: sk-ci-only-placeholder
+      PINECONE_API_KEY: pc-ci-only-placeholder
+      PINECONE_INDEX: campus-rag-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Indexing pipeline tests (OpenAI/Pinecone clients are injected fakes; no network
+          calls to real embedding/vector-store providers occur in this suite)
+        working-directory: backend
+        run: pytest tests/indexing -v
+
+      - name: Async-guard (no sync embed_documents/embed_query/invoke, blocking requests, sync
+          redis in app/indexing)
+        working-directory: backend
+        run: |
+          set -e
+          if grep -RnE "\.embed_documents\(|\.embed_query\(|import requests\b|from redis import(?!\.asyncio)|^\s*import redis$" app/indexing; then
+            echo "Sync embedding call / blocking requests / sync redis import found in app/indexing — forbidden by the async-everywhere rule." >&2
+            exit 1
+          fi
+          if grep -RnE "\.invoke\(" app/indexing --include="*.py"; then
+            echo "Sync .invoke() call found in app/indexing — use .ainvoke() instead." >&2
+            exit 1
+          fi
+          if grep -RnE "create_engine\(" app/indexing; then
+            echo "Sync create_engine() found in app/indexing — use create_async_engine instead." >&2
+            exit 1
+          fi
+          ruff check app/indexing

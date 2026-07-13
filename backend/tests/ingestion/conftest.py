@@ -19,6 +19,13 @@ from app.core.settings import settings
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "ingestion"
 
 
+@pytest.fixture(autouse=True)
+def _f2_settings_env(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("PINECONE_API_KEY", "pc-test")
+    monkeypatch.setenv("PINECONE_INDEX", "campus-rag-test")
+
+
 @pytest_asyncio.fixture
 async def engine():
     eng: AsyncEngine = create_async_engine(str(settings.DATABASE_URL))
