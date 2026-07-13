@@ -38,6 +38,10 @@ dependencies = [
     "langchain-text-splitters==1.1.2",
     "langchain-openai==1.3.5",
     "langchain-pinecone==0.2.13",
+    # --- Baseline RAG chain (F3) ---
+    # langchain-core (LCEL: RunnableLambda, ChatPromptTemplate, StrOutputParser) is already
+    # pinned above under F1 ingestion — reused, not re-pinned.
+    "langfuse==2.60.9",  # optional at runtime — observability.langfuse_handler() is None-safe
 ]
 
 [project.optional-dependencies]

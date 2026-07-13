@@ -1,0 +1,11 @@
+{"question": "probation se kaise nikalta hoon?", "expected_doc_ids": ["pu-academic-probation-2023"], "out_of_corpus": false}
+{"question": "What CGPA puts a student on academic probation?", "expected_doc_ids": ["pu-academic-probation-2023"], "out_of_corpus": false}
+{"question": "mera attendance kam hai, kya main exam de sakta hoon?", "expected_doc_ids": ["pu-examination-rules-2022"], "out_of_corpus": false}
+{"question": "How can I request rechecking of my exam paper?", "expected_doc_ids": ["pu-examination-rules-2022"], "out_of_corpus": false}
+{"question": "plagiarism ki kitni levels hoti hain HEC policy mein?", "expected_doc_ids": ["hec-plagiarism-policy-2021"], "out_of_corpus": false}
+{"question": "What is the penalty for Level 3 plagiarism by a faculty member?", "expected_doc_ids": ["hec-plagiarism-policy-2021"], "out_of_corpus": false}
+{"question": "probation ke dauran kitne credit hours le sakte hain?", "expected_doc_ids": ["pu-academic-probation-2023"], "out_of_corpus": false}
+{"question": "What is the minimum attendance percentage required for the final exam?", "expected_doc_ids": ["pu-examination-rules-2022"], "out_of_corpus": false}
+{"question": "agar CGPA 2.0 se kam ho jaye to kya hota hai?", "expected_doc_ids": ["pu-academic-probation-2023"], "out_of_corpus": false}
+{"question": "Kitne din mein rechecking form submit karni hoti hai?", "expected_doc_ids": ["pu-examination-rules-2022"], "out_of_corpus": false}
+{"question": "What is the capital city of France?", "expected_doc_ids": [], "out_of_corpus": true}

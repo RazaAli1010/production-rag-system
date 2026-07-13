@@ -79,5 +79,27 @@ class Settings(BaseSettings):
     BM25_PATH: Path = Path("app/data/bm25.pkl")
     INDEX_MANIFEST_PATH: Path = Path("app/data/index_manifest.json")
 
+    # --- RAG baseline chain (F3) ---
+    LLM_MODEL: str = "gpt-4o-mini"  # gpt-4o is F3's "deep mode" toggle, not wired until later
+    LLM_MAX_RETRIES: int = 2  # 429/5xx retry budget (AC-21)
+    RETRIEVAL_K: int = 5  # default k; still an explicit answer()/astream() param
+    RETRIEVAL_NAMESPACES: list[str] = ["pu", "hec"]  # fan-out targets when namespace=None (AC-4)
+    REFUSAL_DENSE_THRESHOLD: float = 0.25  # cosine; pre-LLM refusal gate (AC-6)
+    REFUSAL_SUGGESTION_COUNT: int = 3  # "you might check" citations on refusal (AC-7)
+    MAX_QUERY_TOKENS: int = 200  # truncate-and-warn guard (AC-13)
+    CITATION_QUOTE_MAX_WORDS: int = 25  # AC-16
+    DISCLAIMER_TEXT: str = (
+        "This assistant summarizes official PU/HEC documents but is not a substitute for the "
+        "official regulation text. Always verify against the cited source before acting."
+    )
+
+    # --- Langfuse observability (F3) ---
+    # Optional: absent in CI/local dev means observability.langfuse_handler() returns None (no
+    # callback attached) rather than failing boot — Langfuse is not a hard requirement (AC-25
+    # is satisfied whenever these are configured, not unconditionally).
+    LANGFUSE_PUBLIC_KEY: SecretStr | None = None
+    LANGFUSE_SECRET_KEY: SecretStr | None = None
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+
 
 settings = Settings()
