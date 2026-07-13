@@ -65,3 +65,68 @@ jobs:
             exit 1
           fi
           ruff check app/db
+
+  ingestion:
+    name: F1 ingestion — pipeline tests, async guard
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Ingestion pipeline tests (OCR/libreoffice subprocess calls are mocked; the real
+          binaries only run in the Docker ingestion image)
+        working-directory: backend
+        run: pytest tests/ingestion -v
+
+      - name: Async-guard (no sync loader .invoke/.embed_documents, blocking requests, sync
+          redis in app/ingestion)
+        working-directory: backend
+        run: |
+          set -e
+          if grep -RnE "^\s*(import requests\b|from redis import(?!\.asyncio)|^\s*import redis$)" app/ingestion; then
+            echo "Blocking requests / sync redis import found in app/ingestion — forbidden by the async-everywhere rule." >&2
+            exit 1
+          fi
+          # Only flag an actual code call, not the word ".load()" inside a comment/docstring
+          # (several loader docstrings discuss the wrapped libraries' sync .load() by name,
+          # always in backticks — `.load()` — which real code never contains).
+          if grep -RnE "\.load\(\)" app/ingestion --include="*.py" | grep -v to_thread | grep -v '`.load()`'; then
+            echo "Sync loader .load() call found outside anyio.to_thread.run_sync in app/ingestion." >&2
+            exit 1
+          fi
+          ruff check app/ingestion

@@ -4,7 +4,7 @@
 persisted — scores are recomputed per query, so there are deliberately no columns for them.
 """
 
-from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -20,14 +20,17 @@ class Document(Base):  # mirrors DocumentMeta + status
     source_org: Mapped[str]  # "PU" | "HEC" (CHECK)
     url: Mapped[str]
     file_type: Mapped[str]  # pdf|html|docx|pptx|xlsx (CHECK)
-    downloaded_at: Mapped[TZDateTime]
+    # nullable (F1 design.md §8): a row exists at status=registered, before download, when
+    # neither value is known yet.
+    downloaded_at: Mapped[TZDateTime | None]
     version_label: Mapped[str]
     is_scanned: Mapped[bool]
     page_count: Mapped[int | None]
-    sha256: Mapped[str] = mapped_column(index=True)
+    sha256: Mapped[str | None] = mapped_column(index=True)
     status: Mapped[DocumentStatus] = mapped_column(
-        Enum(DocumentStatus, name="document_status"), default=DocumentStatus.registered
+        Enum(DocumentStatus, name="document_status"), default=DocumentStatus.registered, index=True
     )
+    note: Mapped[str | None] = mapped_column(Text)  # F1: human-readable status/failure note
 
     __table_args__ = (
         CheckConstraint("source_org IN ('PU', 'HEC')", name="source_org_valid"),

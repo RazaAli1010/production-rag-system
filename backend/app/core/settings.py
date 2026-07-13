@@ -6,6 +6,8 @@ DB-related keys (design.md §6) plus the seed-admin credentials; other features'
 F12's boot/tests don't require unrelated real credentials.
 """
 
+from pathlib import Path
+
 from pydantic import EmailStr, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,6 +27,31 @@ class Settings(BaseSettings):
     # --- Seed admin (F12) ---
     ADMIN_EMAIL: EmailStr
     ADMIN_PASSWORD: SecretStr
+
+    # --- Ingestion (F1) ---
+    # Paths are relative to the `backend/` cwd (how `make migrate`, alembic, and pytest all run)
+    # and match the repo-structure + .gitignore convention of `backend/app/data/`.
+    DATA_DIR: Path = Path("app/data")
+    RAW_DIR: Path = Path("app/data/raw")
+    EXTRACTED_DIR: Path = Path("app/data/extracted")
+    SOURCES_CSV: Path = Path("app/data/sources.csv")
+
+    INGEST_CONCURRENCY: int = 4  # bounded fan-out for extraction workers
+    INGEST_RATE_LIMIT_PER_SEC: float = 1.0  # polite crawl; Semaphore(1)+sleep
+    INGEST_MAX_RETRIES: int = 3
+    INGEST_DOWNLOAD_TIMEOUT_S: float = 60.0
+
+    OCR_LANGUAGES: str = "eng+urd"
+    OCR_MIN_PAGE_TEXT_CHARS: int = 50  # below this + has image => page is scanned
+    OCR_SCANNED_PAGE_THRESHOLD: float = 0.30  # >30% scanned pages => doc-level is_scanned
+
+    CLEAN_HEADER_FOOTER_PAGE_RATIO: float = 0.60  # line on >60% pages => header/footer
+    CLEAN_MIN_BLOCK_CHARS: int = 20
+
+    LIBREOFFICE_BIN: str = "libreoffice"  # legacy .doc/.ppt conversion in ingestion image
+
+    # repo-root `docs/` (CLAUDE.md repo structure), relative to the `backend/` cwd (AC-32).
+    INGESTION_REPORT_DIR: Path = Path("../docs")
 
 
 settings = Settings()
