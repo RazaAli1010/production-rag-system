@@ -4,14 +4,16 @@ import aiofiles
 import structlog
 from langchain_core.documents import Document
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.settings import Settings
 from app.db.enums import DocumentStatus
 from app.db.models.corpus import Document as DocRow
 
 logger = structlog.get_logger(__name__)
 
 
-async def load_blocks(doc_id, settings):
+async def load_blocks(doc_id: str, settings: Settings) -> list[Document]:
     path = settings.EXTRACTED_DIR / f"{doc_id}.jsonl"
     if not path.exists():
         logger.warning("indexing.source.missing", doc_id=doc_id, path=str(path))
@@ -27,7 +29,9 @@ async def load_blocks(doc_id, settings):
     return docs
 
 
-async def indexed_targets(session, namespace, settings):
+async def indexed_targets(
+    session: AsyncSession, namespace: str, settings: Settings
+) -> list[DocRow]:
     stmt = select(DocRow).where(
         DocRow.status.in_([DocumentStatus.extracted, DocumentStatus.indexed])
     )
