@@ -53,6 +53,7 @@ class StructureChunker:
             if not sections or sections[-1].anchor != anchor:
                 sections.append(_Section(None, anchor, md.get("page_start"), md.get("page_end")))
             sections[-1].parts.append(d.page_content)
+            sections[-1].page_end = md.get("page_end")
         return sections
 
     def _by_clause(self, docs):

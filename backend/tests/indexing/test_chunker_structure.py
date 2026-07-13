@@ -34,6 +34,15 @@ def test_empty_section_merges_forward():
     assert len(chunks) == 1
 
 
+def test_all_sections_short_still_emits_content():
+    s = _settings(CLEAN_MIN_BLOCK_CHARS=20)
+    docs = [_block("hi", heading="A"), _block("yo", heading="B")]
+    chunks = StructureChunker(s).split(docs, "d")
+    assert len(chunks) == 1
+    assert chunks[0].section_heading == "B"
+    assert "hi" in chunks[0].text and "yo" in chunks[0].text
+
+
 def test_pdf_clause_regex_opens_sections():
     s = _settings()
     body = "Preamble line.\n1. First clause body.\n2. Second clause body.\n"
