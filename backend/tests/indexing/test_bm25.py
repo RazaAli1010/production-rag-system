@@ -28,3 +28,11 @@ async def test_pickle_roundtrip_aligned(tmp_path):
     blob = pickle.loads(path.read_bytes())
     assert blob["chunk_ids"] == ids
     assert blob["bm25"].get_scores(urdu_safe_tokenize("first")).shape[0] == 3
+
+
+async def test_empty_corpus_does_not_raise(tmp_path):
+    s = _settings(tmp_path)
+    path = await build_and_pickle([], [], s)
+    blob = pickle.loads(path.read_bytes())
+    assert blob["bm25"] is None
+    assert blob["chunk_ids"] == []

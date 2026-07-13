@@ -13,7 +13,7 @@ def urdu_safe_tokenize(text):
 
 def _build_and_pickle_sync(texts, chunk_ids, path):
     corpus = [urdu_safe_tokenize(t) for t in texts]
-    bm25 = BM25Okapi(corpus)
+    bm25 = BM25Okapi(corpus) if corpus else None
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "wb") as f:
         pickle.dump({"bm25": bm25, "chunk_ids": chunk_ids}, f)
