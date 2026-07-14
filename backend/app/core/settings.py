@@ -101,5 +101,24 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: SecretStr | None = None
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
 
+    # --- Evaluation harness (F4) ---
+    # Paths relative to the `backend/` cwd (how alembic/pytest/`python -m app...` all run).
+    EVAL_DATASET_PATH: Path = Path("app/data/evals/qa_dataset.jsonl")  # git-versioned QA set (AC-1)
+    EVAL_RESULTS_DIR: Path = Path("../docs/eval_results")  # repo-root docs dir
+    EVAL_JUDGE_MODEL: str = "gpt-4o-mini"  # RAGAS judge (AC-9)
+    EVAL_HIT_KS: list[int] = [1, 3, 5]  # hit@k cutoffs (AC-5)
+    EVAL_RETRIEVAL_K: int = 5  # k passed to retrieve() — must be >= max(EVAL_HIT_KS)
+    EVAL_RAGAS_METRICS: list[str] = [
+        "faithfulness", "answer_relevancy", "context_precision", "context_recall",
+    ]
+    EVAL_RAGAS_JUDGE_MULTIPLIER: float = 4.0  # judge prompts per record, for cost preview (AC-11)
+    EVAL_LATENCY_REQUESTS: int = 100  # AC-16
+    EVAL_LATENCY_ENDPOINT: str | None = None  # F11 /api/ask URL; None => in-process astream (AC-17)
+    EVAL_CONCURRENCY: int = 4  # bounded async fan-out over records (Semaphore)
+    EVAL_DATASET_MIN: int = 60  # 60-80 record range (AC-2)
+    EVAL_DATASET_MAX: int = 80
+    EVAL_QUOTA_CODE_SWITCHED: int = 15  # AC-3
+    EVAL_QUOTA_OUT_OF_CORPUS: int = 10  # AC-3
+
 
 settings = Settings()
