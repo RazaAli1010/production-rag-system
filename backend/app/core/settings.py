@@ -90,6 +90,27 @@ class Settings(BaseSettings):
     HYBRID_RRF_K: int = 60  # RRF constant; fused_score = Σ 1/(60 + rank) (AC-7)
     # BM25_PATH (above, F2) is reused verbatim for the sparse index — NOT redefined.
 
+    # --- Reranking (F6) ---
+    ENABLE_RERANK: bool = False  # prod/request toggle; False ≡ F5 path (AC-17)
+    RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # fixed stack (AC-1)
+    # PINNED cpu: HuggingFaceCrossEncoder auto-selects CUDA > MPS > CPU, so without this it would
+    # leave CPU on a dev/CI box with a GPU or Apple silicon (AC-1).
+    RERANK_DEVICE: str = "cpu"
+    RERANK_TOP_N: int = 5  # kept after rerank → count handed to generation (AC-6)
+    RERANK_CANDIDATE_K: int = 12  # pool size fed to rerank; matches HYBRID_FUSED_TOP_K
+    # Calibration (AC-10/AC-11): sigmoid the raw logits into [0, 1]. ms-marco-MiniLM-L-6-v2's head
+    # emits a single unbounded logit, so the default is True; the T6 activation sanity check
+    # confirms (or flips) this against the real model so a double-sigmoid can't corrupt the gate.
+    RERANK_APPLY_SIGMOID: bool = True
+    # Calibrated refusal gate (AC-12/AC-13): refuse when max_rerank_score < this. TUNED (not guessed)
+    # on the 75-record eval set at the F6 gate: out-of-corpus queries all score ≤ 0.005 (the English
+    # cross-encoder finds no relevant chunk), so a Youden-optimal 0.01 refuses 100% of out-of-corpus
+    # while still answering ~86% of in-corpus. A higher value (e.g. 0.5) over-refuses because the
+    # prose-trained model scores in-corpus *code-switched* queries near 0. See
+    # docs/eval_results/f6-rerank-after-vs-f5-hybrid-after.md.
+    REFUSAL_RERANK_THRESHOLD: float = 0.01
+    # HYBRID_FUSED_TOP_K (above, F5) is reused as the hybrid rerank input pool — NOT redefined.
+
     # --- RAG baseline chain (F3) ---
     LLM_MODEL: str = "gpt-4o-mini"  # gpt-4o is F3's "deep mode" toggle, not wired until later
     LLM_MAX_RETRIES: int = 2  # 429/5xx retry budget (AC-21)

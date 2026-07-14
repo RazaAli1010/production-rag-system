@@ -294,7 +294,12 @@ async def test_dense_only_mode_is_identical_to_dense_retrieve(monkeypatch):
                         lambda *a, **k: pytest.fail("hybrid used in dense_only mode"))
 
     out = await retriever.retrieve("q", k=5, namespace=None, settings=settings)
-    assert out is sentinel  # byte-for-byte the baseline path (AC-11)
+    # F6 unified the dispatcher to `pool[:k]`; dense_retrieve already returns ≤k, so the slice is a
+    # content-preserving no-op — the baseline path is byte-for-byte identical in content/order (the
+    # object-identity that held pre-F6 was incidental, not a product requirement (AC-11/F6 AC-17).
+    assert [(c.chunk_id, c.dense_score) for c in out] == \
+        [(c.chunk_id, c.dense_score) for c in sentinel]
+    assert all(c.rerank_score is None for c in out)  # rerank off → no rerank applied
 
 
 async def test_hybrid_mode_dispatches_and_truncates_to_k(monkeypatch):

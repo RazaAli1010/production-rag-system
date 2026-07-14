@@ -38,3 +38,13 @@ async def log_llm_cost(model: str, tokens_in: int, tokens_out: int = 0) -> None:
     cost = estimate_cost(model, tokens_in, tokens_out)
     logger.info("rag.llm_cost", model=model, tokens_in=tokens_in, tokens_out=tokens_out,
                est_cost_usd=cost)
+
+
+def log_rerank(rerank_ms: int, max_score: float, n_candidates: int) -> None:
+    """F6: record the cross-encoder rerank metrics (AC-20). Reranking adds no OpenAI call — the
+    cross-encoder is free/in-process — so there is no `estimate_cost` site here; the only new
+    metric is CPU time (`rerank_ms`, bounded < 300ms p50 by AC-8) plus the calibrated confidence.
+    Synchronous + non-blocking (a structlog emit over a handful of numbers), mirroring the F3/F5
+    convention; F13 later routes this record into `request_logs`/Langfuse without an F6 change."""
+    logger.info("rag.rerank", rerank_ms=rerank_ms, max_rerank_score=max_score,
+                n_candidates=n_candidates)

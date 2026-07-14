@@ -12,7 +12,11 @@ from app.core.contracts import PipelineFlags
 
 
 def apply_flags(settings, flags: PipelineFlags):
-    """Return a settings copy with F5's retrieval toggle reflected from `flags` (never mutates the
-    input). `flags.hybrid` maps to `ENABLE_HYBRID`; `RETRIEVAL_MODE` (the eval-only override) stays
-    untouched so a `bm25_only` diagnostic run still wins over the boolean flag."""
-    return settings.model_copy(update={"ENABLE_HYBRID": flags.hybrid})
+    """Return a settings copy with the retrieval toggles reflected from `flags` (never mutates the
+    input). `flags.hybrid` maps to `ENABLE_HYBRID` (F5); `flags.rerank` maps to `ENABLE_RERANK`
+    (F6). `RETRIEVAL_MODE` (the eval-only override) stays untouched so a `bm25_only` diagnostic run
+    still wins over the boolean flag. Same two call sites F5 wired
+    (`baseline._pipeline_events` + `evals.retrieval.run_retrieval`) — F6 adds no new seam."""
+    return settings.model_copy(
+        update={"ENABLE_HYBRID": flags.hybrid, "ENABLE_RERANK": flags.rerank}
+    )

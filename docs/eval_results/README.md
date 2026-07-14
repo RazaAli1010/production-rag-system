@@ -63,3 +63,40 @@ which re-orders the 12-candidate fused pool instead of truncating it. `ENABLE_HY
 > The `ragas` / `refusal` / `latency` suites are not part of F5's gate (per the CLAUDE.md
 > label-sequence note, latency/cost suites attach only to `f9-cache-after` / `f17-memory-after`);
 > F5's gate is the retrieval hit@k / MRR delta above.
+
+## F6 — Cross-encoder reranking · gate: `f6-rerank-after` vs `f5-hybrid-after`
+
+Delta report: [`f6-rerank-after-vs-f5-hybrid-after.md`](f6-rerank-after-vs-f5-hybrid-after.md)
+(retrieval suite, same index as `f5-hybrid-after`, `--flags hybrid=on,rerank=on`). The cross-encoder
+(`cross-encoder/ms-marco-MiniLM-L-6-v2`) reranks F5's 12-candidate fused pool → top-5. Reproduce:
+
+```bash
+cd backend
+python -m app.evals.run --suite retrieval --flags hybrid=on --label f5-hybrid-after
+python -m app.evals.run --suite retrieval --flags hybrid=on,rerank=on --label f6-rerank-after
+python -m app.evals.run --label f6-rerank-after --compare f5-hybrid-after
+```
+
+**Result (overall):** reranking **recovers the recall F5 traded away** — hit@5 **0.921 → 0.968
+(+0.048 ▲)** (baseline was 0.984; F5's unweighted-RRF truncation had dropped it to 0.921, and F6
+re-orders the 12-pool instead of truncating it, as F5's note predicted). MRR **0.787 → 0.791
+(+0.004 ▲)**, hit@1 flat. hit@3 dips −0.048 ▼ (the cross-encoder reshuffles ranks 2–3). By slice the
+picture is nuanced and honest:
+
+- **`en` ▲** — hit@1 **+0.083**, MRR **+0.045** (prose relevance is exactly what the model is trained
+  for).
+- **`code_switched` mixed→▲** — hit@1 **+0.063**, hit@5 **+0.125**, MRR **+0.065**, but hit@3 −0.063;
+  the English cross-encoder helps at 1/5 despite scoring Roman-Urdu pairs weakly.
+- **`table_lookup` ▼** — hit@1 **−0.125**, MRR **−0.057** (hit@5 +0.125); the prose-trained model
+  mis-ranks tabular/numeric content. This regression is the reason F6 **ships default-off**
+  (`ENABLE_RERANK=false`) and is A/B-gated — flip it per request/env only where it wins.
+
+**Refusal-gate calibration (`REFUSAL_RERANK_THRESHOLD`).** F6 replaces the v1 dense-cosine gate with
+the calibrated `max_rerank_score`. Tuned on the 75-record set: out-of-corpus queries all score
+**≤ 0.005** (the model finds no relevant chunk), so the Youden-optimal **0.01** refuses **100%** of
+out-of-corpus while still answering **~86%** of in-corpus. A higher value (e.g. 0.5) would
+over-refuse — the prose-trained model scores in-corpus *code-switched* queries near 0.
+
+> Same as F5, the `ragas` / `refusal` / `latency` suites are not part of F6's gate; F6's gate is the
+> retrieval hit@k / MRR delta above. `rerank_ms` p50 stays well under the 300 ms budget (CPU,
+> 12 pairs, single batched `score` call off the event loop).
