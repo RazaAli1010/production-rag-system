@@ -16,6 +16,8 @@ from app.core.contracts import AnswerResponse, MemoryContext
 from app.rag import citations as citations_mod
 from app.rag import context, observability, prompt, refusal
 from app.rag import errors as errors_mod
+from app.rag import flags as flags_mod
+from app.rag import hybrid as hybrid_mod
 from app.rag import retriever as retriever_mod
 from app.rag.events import SSEEvent, stage_event
 from app.rag.schemas import PipelineFlags
@@ -101,6 +103,9 @@ async def _pipeline_events(
     """The single source of pipeline truth `astream`/`answer` both consume (AC-19). Emits the
     ordered `stage*` -> `token*` -> `citations` -> `meta` -> `done`|`error` sequence."""
     query = _truncate_query(query, settings)
+    # F5: reflect the request/eval hybrid toggle onto settings before retrieval, so the F3→F5 seam
+    # (`retriever.retrieve`, which reads the mode from settings) honours `flags.hybrid` (AC-12).
+    settings = flags_mod.apply_flags(settings, flags)
 
     t0 = time.monotonic()
     yield stage_event("searching", "started")
@@ -112,8 +117,12 @@ async def _pipeline_events(
         # Any unrecoverable retrieval failure (ProviderError after retry exhaustion, or a
         # non-retryable error like the namespace-fan-out failure documented in retriever.py)
         # becomes a terminal SSE error event rather than raising past the generator boundary.
+        # (Hybrid mode degrades to BM25-only instead of raising here — see hybrid.hybrid_retrieve.)
         yield SSEEvent(event="error", data={"message": str(exc)})
         return
+    # F5: hybrid retrieval sets this out-of-band when it fell back to BM25-only (AC-14/AC-17);
+    # dense_only/bm25_only paths never set it, so this reads False there.
+    degraded = hybrid_mod.was_degraded()
     yield stage_event("searching", "done", ms=int((time.monotonic() - t0) * 1000))
 
     if refusal.pre_llm_gate(chunks, settings):
@@ -133,6 +142,7 @@ async def _pipeline_events(
             session_id=None,
             memory_summarized=False,
             cache_hit=False,
+            degraded=degraded,
         )
         yield SSEEvent(event="citations", data={"citations": [c.model_dump() for c in suggestions]})
         yield SSEEvent(event="meta", data=response.model_dump(exclude={"answer"}))
@@ -188,6 +198,7 @@ async def _pipeline_events(
         session_id=None,
         memory_summarized=False,
         cache_hit=False,
+        degraded=degraded,
     )
     yield SSEEvent(event="citations",
                    data={"citations": [c.model_dump() for c in resolved_citations]})

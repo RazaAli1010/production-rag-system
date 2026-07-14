@@ -99,3 +99,7 @@ class AnswerResponse(BaseModel):
     session_id: str | None = None
     memory_summarized: bool = False
     cache_hit: bool = False
+    # F5: True when hybrid retrieval fell back to BM25-only because the dense (Pinecone) query
+    # failed (AC-14/AC-17). Additive, non-persisted contract field — default False keeps every
+    # prior F3/F4 path and test unchanged; no Alembic migration (AnswerResponse is not a table).
+    degraded: bool = False

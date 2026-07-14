@@ -39,3 +39,27 @@ python -m app.evals.run --label baseline --compare baseline    # sanity: all-zer
 
 `--yes` confirms the RAGAS judge spend (a cost preview prints first). Every run stamps the report
 with the git SHA + index manifest so numbers are reproducible.
+
+## F5 — Hybrid search (BM25 + dense + RRF) · gate: `f5-hybrid-after` vs `baseline`
+
+Delta report: [`f5-hybrid-after-vs-baseline.md`](f5-hybrid-after-vs-baseline.md) (retrieval suite,
+same index as `baseline`, `--flags hybrid=on`). Reproduce:
+
+```bash
+cd backend
+python -m app.evals.run --suite retrieval --label baseline                       # dense-only
+python -m app.evals.run --suite retrieval --flags hybrid=on --label f5-hybrid-after
+python -m app.evals.run --label f5-hybrid-after --compare baseline
+```
+
+**Result (overall):** hit@1 **0.619 → 0.683 (+0.064 ▲)**, MRR **0.772 → 0.787 (+0.015 ▲)**, but
+hit@3 −0.016 ▼ and hit@5 **0.984 → 0.921 (−0.064 ▼)**. Unweighted RRF at generation-`k`=5 (no
+reranking yet) promotes strong sparse hits to the top — lifting precision@1 (the intended exact-term
+rescue, e.g. `table_lookup` hit@1 **+0.125 ▲**) while displacing some dense chunks out of the top-5,
+costing recall. This precision-for-recall trade is expected to be recovered by **F6 reranking**,
+which re-orders the 12-candidate fused pool instead of truncating it. `ENABLE_HYBRID` defaults
+**off**, so this ships dark and is A/B-gated.
+
+> The `ragas` / `refusal` / `latency` suites are not part of F5's gate (per the CLAUDE.md
+> label-sequence note, latency/cost suites attach only to `f9-cache-after` / `f17-memory-after`);
+> F5's gate is the retrieval hit@k / MRR delta above.

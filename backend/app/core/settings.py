@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     BM25_PATH: Path = Path("app/data/bm25.pkl")
     INDEX_MANIFEST_PATH: Path = Path("app/data/index_manifest.json")
 
+    # --- Hybrid search (F5) ---
+    ENABLE_HYBRID: bool = False  # prod/request toggle; False ≡ F3 dense-only path (AC-11)
+    # eval-only explicit override; wins over ENABLE_HYBRID so dense_only|bm25_only|hybrid A/Bs run
+    # under the F4 harness with no F4 code change (AC-13). None => derive mode from ENABLE_HYBRID.
+    RETRIEVAL_MODE: Literal["dense_only", "bm25_only", "hybrid"] | None = None
+    HYBRID_DENSE_TOP_K: int = 20  # dense candidates before fusion (raised from RETRIEVAL_K, AC-5)
+    HYBRID_SPARSE_TOP_K: int = 20  # BM25 candidates before fusion (AC-3)
+    HYBRID_FUSED_TOP_K: int = 12  # fused pool cap exposed to F6 rerank (AC-9)
+    HYBRID_RRF_K: int = 60  # RRF constant; fused_score = Σ 1/(60 + rank) (AC-7)
+    # BM25_PATH (above, F2) is reused verbatim for the sparse index — NOT redefined.
+
     # --- RAG baseline chain (F3) ---
     LLM_MODEL: str = "gpt-4o-mini"  # gpt-4o is F3's "deep mode" toggle, not wired until later
     LLM_MAX_RETRIES: int = 2  # 429/5xx retry budget (AC-21)

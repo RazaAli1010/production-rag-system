@@ -11,6 +11,7 @@ import asyncio
 from app.core.contracts import RetrievedChunk
 from app.evals.schemas import EvalRecord, MetricValue, SuiteResult
 from app.rag import retriever as retriever_mod
+from app.rag.flags import apply_flags
 
 # Tags that name a measurable retrieval slice (AC-7). `out_of_corpus` is not here — it's excluded.
 _SLICE_TAGS = ["en", "code_switched", "multi_doc", "table_lookup"]
@@ -58,6 +59,12 @@ async def run_retrieval(
     # Resolve the seam at call time (not a def-time default) so monkeypatching `retriever.retrieve`
     # in an end-to-end run.main test takes effect, while direct unit tests can still inject a spy.
     retrieve = retrieve or retriever_mod.retrieve
+    # F5: this is the one suite that calls the seam directly (not via answer()), so reflect the
+    # hybrid toggle onto settings here — the wiring the F4 comment reserved ("retrieve() reads
+    # toggles from settings (F5+)"). Scoring is unchanged; only the retrieval mode is toggled.
+    # `flags` stays optional for this suite (a caller may pass None to use the settings default).
+    if flags is not None:
+        settings = apply_flags(settings, flags)
     answerable = [r for r in records if not r.is_out_of_corpus]
     k_max = settings.EVAL_RETRIEVAL_K
     sem = asyncio.Semaphore(settings.EVAL_CONCURRENCY)

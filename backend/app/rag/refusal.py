@@ -7,10 +7,18 @@ from app.rag.context import extract_quote
 
 def pre_llm_gate(chunks: list[RetrievedChunk], settings) -> bool:
     """True when the system should refuse *before* invoking the LLM (AC-6). Empty retrieval is
-    treated as `dense_score = -inf` — the same refusal path, no special case (design.md §7)."""
+    treated as `dense_score = -inf` — the same refusal path, no special case (design.md §7).
+
+    F5 (AC-15): evaluates the **maximum** `dense_score` across the retrieved set, not
+    `chunks[0].dense_score`. After RRF fusion the top chunk may be a strong sparse-only hit
+    (`dense_score is None`); ranking it #1 must not spuriously refuse an in-corpus query when a
+    dense chunk above threshold sits deeper in the fused pool. A set whose every dense_score is
+    below threshold (or absent) is still refused — out-of-corpus protection intact. For the F3
+    dense-only path the max is `chunks[0]`, so behaviour is unchanged there."""
     if not chunks:
         return True
-    top_score = chunks[0].dense_score if chunks[0].dense_score is not None else float("-inf")
+    dense_scores = [c.dense_score for c in chunks if c.dense_score is not None]
+    top_score = max(dense_scores) if dense_scores else float("-inf")
     return top_score < settings.REFUSAL_DENSE_THRESHOLD
 
 

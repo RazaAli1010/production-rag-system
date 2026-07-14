@@ -65,15 +65,17 @@ def _merge_top_k(*scored: list[RetrievedChunk], k: int) -> list[RetrievedChunk]:
     return merged[:k]
 
 
-async def retrieve(
+async def dense_retrieve(
     query: str, k: int, namespace: str | None, settings
 ) -> list[RetrievedChunk]:
-    """The F3->F5 seam (AC-1). `namespace=None` fans out over `settings.RETRIEVAL_NAMESPACES`
-    (AC-4); a single namespace queries that namespace only.
+    """F3's dense-only retrieval — the `baseline` path, unchanged. `namespace=None` fans out over
+    `settings.RETRIEVAL_NAMESPACES` (AC-4); a single namespace queries that namespace only.
 
     Fan-out uses plain `asyncio.gather` (no `return_exceptions=True`): if one namespace query
     raises, the whole call raises rather than silently returning only the other namespace's
-    results — an incomplete top-k presented as complete would be worse than a loud failure."""
+    results — an incomplete top-k presented as complete would be worse than a loud failure. (F5's
+    hybrid path catches that raise and degrades to BM25-only; dense_only propagates it as before.)
+    """
     if namespace is not None:
         return await _retrieve_namespace(query, k, namespace, settings)
 
@@ -81,3 +83,32 @@ async def retrieve(
         *(_retrieve_namespace(query, k, ns, settings) for ns in settings.RETRIEVAL_NAMESPACES)
     )
     return _merge_top_k(*results, k=k)
+
+
+def resolve_mode(settings) -> str:
+    """Effective retrieval mode (AC-11/AC-13). `RETRIEVAL_MODE` is an eval-only explicit override
+    that wins over `ENABLE_HYBRID`; otherwise hybrid iff `ENABLE_HYBRID`, else dense-only."""
+    if settings.RETRIEVAL_MODE is not None:
+        return settings.RETRIEVAL_MODE
+    return "hybrid" if settings.ENABLE_HYBRID else "dense_only"
+
+
+async def retrieve(
+    query: str, k: int, namespace: str | None, settings
+) -> list[RetrievedChunk]:
+    """The F3→F5 seam (signature unchanged, AC-16): dispatches on the effective retrieval mode.
+
+    `dense_only` is byte-for-byte F3 (`baseline`). `hybrid` fuses BM25+dense (F5) and returns the
+    top `k` of the ≤`HYBRID_FUSED_TOP_K` fused pool, so the count handed to generation stays `k`
+    (=5) until F6 inserts reranking (AC-9). `bm25_only` is an eval diagnostic (AC-13). `hybrid`
+    imported lazily to avoid an import cycle (hybrid imports this module at top level)."""
+    mode = resolve_mode(settings)
+    if mode == "dense_only":
+        return await dense_retrieve(query, k, namespace, settings)
+
+    from app.rag import hybrid  # lazy: breaks the retriever↔hybrid import cycle
+
+    if mode == "bm25_only":
+        return await hybrid.sparse_only(query, k, namespace, settings)
+    fused = await hybrid.hybrid_retrieve(query, k, namespace, settings)
+    return fused[:k]
