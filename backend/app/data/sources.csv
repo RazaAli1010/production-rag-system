@@ -1,0 +1,6 @@
+doc_id,title,source_org,url,file_type,version_label,notes
+pu-semester-rules-ug,University of the Punjab Semester Rules & Regulations,PU,https://pu.edu.pk/puac/download/Semester_Rules.pdf,pdf,current,Attendance/grading/probation/promotion/examination rules
+pu-semester-rules-affiliated,University of the Punjab Semester Rules & Regulations for Affiliated Colleges,PU,https://pu.edu.pk/puac/download/Flax-Affiliated-Colleges.pdf,pdf,current,Affiliated-college semester system rules
+pu-fee-schedule-ug-2024,University of the Punjab Fee/Dues Schedule (Undergraduate) FY2024-25,PU,https://pu.edu.pk/downloads/Dues-Fee-Schedule-PU-Students.pdf,pdf,2024-25,Program-wise fee tables (table_lookup source)
+pu-fee-schedule-grad-2024,University of the Punjab Fee/Dues Schedule (MS/MPhil/PhD) FY2024-25,PU,https://pu.edu.pk/downloads/Dues-Fee-Schedule-MS-MPhil-PhD.pdf,pdf,2024-25,Graduate program fee tables (table_lookup source)
+hec-plagiarism-policy-2021,HEC Plagiarism Policy,HEC,https://www.juw.edu.pk/resource/uploads/2021/08/HEC-Plagiarism-Policy.pdf,pdf,2021,University-hosted mirror; hec.gov.pk is SSL-cert-blocked in this environment
