@@ -64,10 +64,12 @@ async def test_load_aborts_on_malformed_json(tmp_path: Path):
         await load_dataset(s)
 
 
-async def test_seed_dataset_loads_even_if_under_quota():
-    # The committed real seed must at least PARSE (lint under-quota is expected + documented).
+async def test_committed_seed_dataset_passes_lint():
+    # The committed dataset is authored + verified against the live corpus (60-80 records,
+    # all tag quotas met), so it must both parse AND pass lint with the production thresholds.
     s = make_settings(EVAL_DATASET_PATH=Path("app/data/evals/qa_dataset.jsonl"))
     records = await load_dataset(s)
-    assert len(records) >= 12
+    assert 60 <= len(records) <= 80
     tags = {t for r in records for t in r.tags}
     assert {"en", "code_switched", "out_of_corpus", "multi_doc", "table_lookup"} <= tags
+    assert lint_dataset(records, s) == []

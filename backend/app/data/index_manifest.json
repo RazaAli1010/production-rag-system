@@ -1,0 +1,17 @@
+{
+  "strategy": "fixed",
+  "embed_model": "text-embedding-3-small",
+  "namespaces": {
+    "pu": {
+      "vectors": 349,
+      "chunks": 349
+    },
+    "hec": {
+      "vectors": 239,
+      "chunks": 239
+    }
+  },
+  "total_tokens": 15290,
+  "est_cost_usd": 0.0003058,
+  "created_at": "2026-07-14T07:55:21.851287+00:00"
+}
