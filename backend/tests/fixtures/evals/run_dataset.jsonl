@@ -1,0 +1,6 @@
+{"qid": "r-en-1", "question": "What CGPA triggers probation?", "ground_truth_answer": "Below 2.00.", "source_doc_ids": ["pu-academic-probation-2023"], "source_pages_or_anchors": ["2"], "tags": ["en"]}
+{"qid": "r-cs-1", "question": "probation se kaise nikloon?", "ground_truth_answer": "Raise GPA to 2.00.", "source_doc_ids": ["pu-academic-probation-2023"], "source_pages_or_anchors": ["3"], "tags": ["code_switched"]}
+{"qid": "r-md-1", "question": "probation and attendance rules?", "ground_truth_answer": "Both apply.", "source_doc_ids": ["pu-academic-probation-2023", "pu-examination-rules-2022"], "source_pages_or_anchors": ["4"], "tags": ["en", "multi_doc"]}
+{"qid": "r-tl-1", "question": "grade bands table?", "ground_truth_answer": "A is 80%+.", "source_doc_ids": ["pu-examination-rules-2022"], "source_pages_or_anchors": ["11"], "tags": ["en", "table_lookup"]}
+{"qid": "r-ooc-1", "question": "capital of France?", "ground_truth_answer": "", "source_doc_ids": [], "source_pages_or_anchors": [], "tags": ["out_of_corpus"]}
+{"qid": "r-ooc-2", "question": "US visa steps?", "ground_truth_answer": "", "source_doc_ids": [], "source_pages_or_anchors": [], "tags": ["out_of_corpus"]}

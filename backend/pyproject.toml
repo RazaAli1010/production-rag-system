@@ -42,6 +42,14 @@ dependencies = [
     # langchain-core (LCEL: RunnableLambda, ChatPromptTemplate, StrOutputParser) is already
     # pinned above under F1 ingestion — reused, not re-pinned.
     "langfuse==2.60.9",  # optional at runtime — observability.langfuse_handler() is None-safe
+    # --- Evaluation harness (F4) ---
+    # RAGAS judge suite. 0.4.3 resolves cleanly against langchain-core 1.4.9 (no downgrade), but its
+    # `ragas.llms.base` unconditionally imports `langchain_community.chat_models.vertexai`, a path the
+    # sunset langchain-community 0.4.2 no longer ships. We never use Vertex (judge is ChatOpenAI), so
+    # app/evals/_ragas_compat.py installs a one-module sys.modules shim before importing ragas — the
+    # "isolate" half of the required-dep decision. Pulls datasets/langgraph/scipy transitively; the
+    # transitive langgraph is NOT the CLAUDE.md v2 "LangGraph routing" stretch item, just a ragas dep.
+    "ragas==0.4.3",
 ]
 
 [project.optional-dependencies]
