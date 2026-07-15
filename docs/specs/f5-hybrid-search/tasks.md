@@ -120,7 +120,7 @@ Run the F4 harness against the hybrid path and commit the delta report:
 # F5 adds no re-index (design §2) — dense vectors identical, so baseline numbers stay comparable.
 
 python -m app.evals.run --suite all \
-    --flags hybrid=on,rerank=off,memory=off \
+    --flags hybrid=on,rerank=off,query_rewrite=off,compression=off,memory=off \
     --label f5-hybrid-after --yes
 
 python -m app.evals.run --label f5-hybrid-after --compare baseline

@@ -141,5 +141,5 @@ predecessor. The mandatory `--compare`/delta-report gate begins at **F5 (Hybrid)
 the `baseline` label this feature produces. From F5 on, every Phase B/C tasks.md closes with: run
 `python -m app.evals.run --suite <suites> --flags <...> --label <this-label>`, then
 `--compare <previous-label>` (per the fixed sequence `baseline → f5-hybrid-after → f6-rerank-after →
-f9-cache-after → f17-memory-after`), and commit the
+f7-rewrite-after → f8-compression-after → f9-cache-after → f17-memory-after`), and commit the
 resulting `docs/eval_results/{label}-vs-{prev}.md`.

@@ -3,7 +3,7 @@
 Auto-generated reports from the F4 harness live here — one `{label}.md` per run and one
 `{label}-vs-{prev}.md` per `--compare`. Each Phase B/C feature commits its delta report here as its
 eval-gate artifact (fixed label sequence: `baseline → f5-hybrid-after → f6-rerank-after →
-f9-cache-after → f17-memory-after`).
+f7-rewrite-after → f8-compression-after → f9-cache-after → f17-memory-after`).
 
 ## Dataset status — VERIFIED (75 records)
 

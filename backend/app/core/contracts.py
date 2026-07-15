@@ -76,7 +76,7 @@ class StageEvent(BaseModel):
 
 
 class PipelineFlags(BaseModel):
-    """Inert, forward-declared toggles (Phase A) — all `False` until F5/F6/F9/F17 wire them up.
+    """Inert, forward-declared toggles (Phase A) — all `False` until F5–F9/F17 wire them up.
 
     Lives here (not only re-exported from `app.rag.schemas`) so `AnswerResponse` can reference it
     without a circular import between `app.core.contracts` and `app.rag.schemas`.
@@ -84,6 +84,8 @@ class PipelineFlags(BaseModel):
 
     hybrid: bool = False
     rerank: bool = False
+    query_rewrite: bool = False
+    compression: bool = False
     cache: bool = False
     memory: bool = False
 

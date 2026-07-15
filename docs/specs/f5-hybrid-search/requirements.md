@@ -170,10 +170,9 @@ rollback and A/B are a config flip. The F4 harness's `--flags hybrid=on/off` dri
 
 - **Reranking (F6):** F5 exposes the 12-candidate fused pool with scores; it does **not** re-order by
   a cross-encoder. `retrieve` returns `k=5`; F6 will consume the 12 and cut to 5.
-- **Caching (F9), memory (F17), and the later augmentation/generation phase:** F5 touches
-  only the retrieval step; the F9 cache key and all downstream flags are untouched. (The former F7
-  query-rewrite / F8 compression stages have been dropped — retrieval enhancement ends at F6, and the
-  standalone-question condensation once planned for F7 now folds into F17.)
+- **Query rewrite / condensation (F7), compression (F8), caching (F9), memory (F17):** F5 touches
+  only the retrieval step; the F9 cache key change (standalone question) and all downstream flags are
+  untouched.
 - **Rebuilding / enriching `bm25.pkl`:** F5 reads the existing F2 artifact as-is and hydrates
   sparse-only hits via Pinecone `fetch`; it deliberately does **not** change
   `app.indexing.bm25.build_and_pickle` or force a re-index/re-embed (blast-radius and cost note in

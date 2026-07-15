@@ -70,10 +70,9 @@ calibrated rerank score. The F4 harness drives the same toggle via `--flags rera
   working `ContextualCompressionRetriever(CrossEncoderReranker(...))` built over the shared model
   and covered by a test, so the LangChain reranking API is demonstrably exercised even though it is
   off the hot path.
-- **US-7 (Downstream augmentation/generation developer):** As the author of a later
-  augmentation/generation stage (or F9/F17), I want F6 to leave the seam signature and the SSE
-  contract unchanged and to populate `rerank_score` on the returned chunks, so later stages consume
-  the reranked top-5 without touching rerank code.
+- **US-7 (Downstream F7/F8 developer):** As the query-rewrite / compression author, I want F6 to
+  leave the seam signature and the SSE contract unchanged and to populate `rerank_score` on the
+  returned chunks, so later stages consume the reranked top-5 without touching rerank code.
 
 ---
 
@@ -220,10 +219,9 @@ calibrated rerank score. The F4 harness drives the same toggle via `--flags rera
 
 ## 5. Out of scope (do not implement here)
 
-- **Caching (F9), memory (F17), and the later augmentation/generation phase:** F6 touches
+- **Query rewrite / condensation (F7), compression (F8), caching (F9), memory (F17):** F6 touches
   only the rerank step inside the retrieval seam; the F9 cache key and all downstream flags are
-  untouched. (The former F7 query-rewrite / F8 compression stages have been dropped — retrieval
-  enhancement ends at F6.)
+  untouched.
 - **A GPU / batched-service reranker:** F6 is CPU, in-process, single `score` call; a GPU path or a
   separate reranking microservice is not part of this gate.
 - **Changing F5 fusion, `bm25.pkl`, or the dense index:** F6 reads F5's fused pool as-is and forces

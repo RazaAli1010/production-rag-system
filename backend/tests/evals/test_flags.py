@@ -6,8 +6,8 @@ from app.evals.flags import parse_flags
 
 
 def test_parse_basic():
-    f = parse_flags("hybrid=on,rerank=off,memory=on")
-    assert f.hybrid is True and f.rerank is False and f.memory is True
+    f = parse_flags("hybrid=on,rerank=off,query_rewrite=true")
+    assert f.hybrid is True and f.rerank is False and f.query_rewrite is True
 
 
 def test_cache_always_forced_off():

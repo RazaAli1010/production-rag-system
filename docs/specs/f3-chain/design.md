@@ -166,8 +166,8 @@ async def log_llm_cost(model: str, tokens_in: int, tokens_out: int) -> None: ...
 
 # schemas.py
 class PipelineFlags(BaseModel):
-    hybrid: bool = False; rerank: bool = False
-    cache: bool = False; memory: bool = False
+    hybrid: bool = False; rerank: bool = False; query_rewrite: bool = False
+    compression: bool = False; cache: bool = False; memory: bool = False
 
 # baseline.py — the two public entry points, one source of truth
 async def _pipeline_events(
