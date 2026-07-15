@@ -49,8 +49,6 @@ def test_pipeline_flags_round_trips():
     assert flags.model_dump() == {
         "hybrid": False,
         "rerank": False,
-        "query_rewrite": False,
-        "compression": False,
         "cache": False,
         "memory": False,
     }

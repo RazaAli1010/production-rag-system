@@ -28,7 +28,7 @@ backend/app/indexing/
 Shared/canonical models (`Chunk`, `DocumentMeta`, `Citation`, …) are imported from the
 project-wide contracts / `app.db.models`, **not** redefined here. `cost.estimate_cost()` is
 introduced by F2 (first OpenAI-calling feature) as the single central cost helper mandated by
-CLAUDE.md, and is reused by every later OpenAI-calling feature (F3, F7, F8, F9, F17).
+CLAUDE.md, and is reused by every later OpenAI-calling feature (F3, F9, F17).
 
 ---
 

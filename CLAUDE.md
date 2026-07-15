@@ -8,7 +8,8 @@ messy typo-ridden Urdu/English code-switched questions ("probation se kaise nika
 ## Core philosophy (do not violate)
 
 1. Build the **simplest working RAG first (F3)**, then add ONE enhancement at a time.
-2. Every enhancement (F5–F9, F17) ends with a **mandatory eval gate**: run the F4 harness,
+2. Every enhancement (F5, F6, F9, F17, and any augmentation/generation feature) ends with a
+   **mandatory eval gate**: run the F4 harness,
    `--compare` the previous phase label, and commit a delta report to `docs/eval_results/`.
    A feature is NOT done until its delta table exists.
 3. Every enhancement is **toggleable via a config/request flag** so A/B and prod rollback
@@ -60,7 +61,7 @@ campus-rag/
 │   ├── api/            # routers: ask, auth, documents, admin, health
 │   ├── core/           # settings, security, logging, exceptions
 │   ├── db/             # SQLAlchemy models, session, Alembic migrations (F12)
-│   ├── ingestion/      # F1   indexing/  # F2   rag/  # F3 + F5–F8
+│   ├── ingestion/      # F1   indexing/  # F2   rag/  # F3 + F5–F6
 │   ├── memory/         # F17: sessions, token accounting, summarizer, stage events
 │   ├── caching/        # F9   auth/  # F10   evals/  # F4   observability/  # F13
 │   ├── data/           # sources.csv, raw files, extracted JSONL, bm25.pkl
@@ -75,13 +76,16 @@ campus-rag/
 
 ```
 PHASE A: F12 Persistence → F1 Ingestion → F2 Indexing → F3 Baseline RAG → F4 Eval harness
-PHASE B (each eval-gated): F5 Hybrid → F6 Reranking → F7 Query rewrite → F8 Compression
+PHASE B — Retrieval enhancement (each eval-gated): F5 Hybrid → F6 Reranking   # retrieval track ENDS here
+PHASE B2 — Augmentation & Generation (each eval-gated; features + labels TBD, spec later)
 PHASE C: F9 Semantic cache → F10 Auth → F17 Session memory → F11 API hardening → F13 Observability
 PHASE D: F14 Frontend → F15 Deploy/CI/load-test → F16 Telegram bot (optional)
 ```
 
-Within Phase B the build order IS the measurement order: each feature's "before" = the
-previous feature's "after". Build F12 FIRST — it blocks everything.
+Retrieval enhancement stops at F6 reranking; the former F7 (query rewrite) and F8 (compression)
+are dropped — the next enhancement phase (B2) targets augmentation & generation instead. Within
+Phase B the build order IS the measurement order: each feature's "before" = the previous
+feature's "after". Build F12 FIRST — it blocks everything.
 
 ## Canonical data contracts (Pydantic — the cross-feature interface)
 
@@ -106,8 +110,8 @@ no contract change — later features only add stages.
 
 ## Pipeline order (F11, sequence diagram required)
 
-validate → auth → rate limit → **load memory + summarize-if-flagged (F17)** → rewrite/condense
-(F7) → cache lookup (F9) → hybrid retrieve (F5) → rerank (F6) → refusal gate → compress (F8) →
+validate → auth → rate limit → **load memory + summarize-if-flagged + condense-follow-up (F17)**
+→ cache lookup (F9) → hybrid retrieve (F5) → rerank (F6) → refusal gate →
 generate (F3 chain, `MemoryContext` in prompt) → cache write → persist assistant message
 (F17, write-behind) → log (F13). Flags checked at each seam; each seam emits paired `stage`
 events via the single F17 emitter (`app/memory/stages.py`).
@@ -116,8 +120,7 @@ events via the single F17 emitter (`app/memory/stages.py`).
 
 - Secrets/URLs: `OPENAI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX`, `DATABASE_URL`
   (Postgres, asyncpg), `REDIS_URL`, `JWT_SECRET`, `LANGFUSE_*`.
-- Feature flags: `ENABLE_HYBRID`, `ENABLE_RERANK`, `ENABLE_QUERY_REWRITE`,
-  `ENABLE_COMPRESSION`, `ENABLE_CACHE`, `ENABLE_MEMORY`.
+- Feature flags: `ENABLE_HYBRID`, `ENABLE_RERANK`, `ENABLE_CACHE`, `ENABLE_MEMORY`.
 - Memory: `MEMORY_TOKEN_BUDGET=50_000`, `MEMORY_WINDOW_PAIRS=5` (sliding window),
   `MEMORY_KEEP_LAST_PAIRS=2` (shrunken window once over budget),
   `MEMORY_SUMMARIZE_EVERY_PAIRS=3` (lazy-summary batch), `MEMORY_SUMMARY_MAX_TOKENS=600`.
@@ -132,15 +135,14 @@ The prompt NEVER carries the full transcript. Prompt context per turn is always 
 
 Pairs that slide out are folded into a rolling `gpt-4o-mini` summary, lazily and in batches
 (one call per 3 slid-out pairs). History is context for dialogue coherence ONLY and is
-explicitly **non-citable** — a `[n]` may only point at retrieved chunks. F7 condenses
+explicitly **non-citable** — a `[n]` may only point at retrieved chunks. F17 condenses
 follow-ups into a **standalone question**; retrieval AND the F9 cache key both use it, so
 follow-ups never poison the cache. Memory reads are O(window), not O(transcript). Per-session
 `asyncio.Lock` serializes concurrent asks → second request returns 409 `session_busy`.
 
 ## Eval-gate label sequence (fixed, used with `--compare`)
 
-`baseline` → `f5-hybrid-after` → `f6-rerank-after` → `f7-rewrite-after` →
-`f8-compression-after` → `f9-cache-after` → `f17-memory-after`
+`baseline` → `f5-hybrid-after` → `f6-rerank-after` → `f9-cache-after` → `f17-memory-after`
 (latency/cost suites only for the last two). Every README benchmark row maps to a label; every
 label maps to a git SHA + index manifest so all numbers are reproducible.
 

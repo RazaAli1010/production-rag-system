@@ -14,7 +14,7 @@ recording the `baseline` label is a pure F4 CLI run with **zero F3 code changes*
 F3 is the simplest honest pipeline, expressed as a LangChain LCEL chain: embed the query, fetch
 dense top-`k` chunks from Pinecone, stuff them into a prompt, call `gpt-4o-mini`, parse `[n]`
 citation markers back to Postgres `chunks`/`documents` rows, and stream the whole thing over the
-F3-defined SSE contract. This is the **measured baseline** every Phase B feature (F5–F8) must beat
+F3-defined SSE contract. This is the **measured baseline** every Phase B feature (F5–F6) must beat
 under the F4 harness, so its retrieval and generation seams must be swappable without touching the
 prompt/parse stages.
 
@@ -24,7 +24,7 @@ first feature to *read* that index, and does so through `PineconeVectorStore` co
 the same async index client, so retrieval stays on LangChain's async surface while reusing exactly
 the vectors/metadata F2 wrote (`id=chunk_id`, `text_key="text"`, `namespace=source_org`).
 
-F3 does **not** implement hybrid search, reranking, query rewriting, compression, caching, auth, or
+F3 does **not** implement hybrid search, reranking, caching, auth, or
 session memory — it is the honest floor those features are measured against, and it must accept
 (but ignore, passing `None`) a pre-assembled `MemoryContext` so F17 never needs a signature change.
 
@@ -142,7 +142,7 @@ session memory — it is the honest floor those features are measured against, a
 
 ### 3.6 Interface, flags & observability
 - **AC-23 (Ubiquitous):** The system shall accept an optional `flags: PipelineFlags` (hybrid,
-  rerank, query_rewrite, compression, cache, memory — all `False`/inert in Phase A) and record their
+  rerank, cache, memory — all `False`/inert in Phase A) and record their
   state verbatim on `AnswerResponse.pipeline_flags` on every call.
 - **AC-24 (Ubiquitous):** The system shall accept an optional pre-assembled `MemoryContext` prompt
   input, defaulting to `None`, and simply omit history from the prompt when absent — no F17-specific
@@ -175,8 +175,8 @@ session memory — it is the honest floor those features are measured against, a
 
 ## 5. Out of scope (do not implement here)
 
-- Hybrid/BM25 fusion, reranking, query rewriting, context compression (F5–F8) — F3's `retrieve()` is
-  the seam those features replace, not extend in place.
+- Hybrid/BM25 fusion and reranking (F5–F6) — F3's `retrieve()` is the seam those features replace,
+  not extend in place. (Query rewriting / context compression, once planned as F7/F8, are dropped.)
 - Semantic caching (F9), auth/authz (F10), multi-turn session memory (F17) — F3 accepts but ignores
   `MemoryContext`, and defines `PipelineFlags` only as inert, forward-declared toggles.
 - The actual FastAPI route / `StreamingResponse` wiring, rate limiting, and HTTP error mapping (F11)
