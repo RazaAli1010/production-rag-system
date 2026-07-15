@@ -94,6 +94,21 @@ def test_merge_top_k_orders_desc_and_truncates():
     assert [c.chunk_id for c in merged] == ["b", "c"]
 
 
+async def test_gather_candidate_pool_matches_retrieve_when_rerank_off(monkeypatch):
+    # F7 refactor regression: retrieve() == gather_candidate_pool()[:k] on the dense_only path with
+    # rerank off (byte-for-byte f6-rerank-after — the pool-gathering was factored out unchanged).
+    store = FakeStore({"pu": [(_doc("d:0"), 0.9), (_doc("d:1"), 0.8), (_doc("d:2"), 0.7)]})
+    monkeypatch.setattr(retriever, "_build_store", lambda settings: store)
+    settings = _settings()
+
+    pool = await retriever.gather_candidate_pool("q", k=2, namespace="pu", settings=settings)
+    got = await retriever.retrieve("q", k=2, namespace="pu", settings=settings)
+
+    # retrieve() == gather_candidate_pool()[:k]; on the dense path the store already applies k, so
+    # both yield the same top-2 in the same order (the refactor changed no behaviour).
+    assert [c.chunk_id for c in got] == [c.chunk_id for c in pool][:2] == ["d:0", "d:1"]
+
+
 def test_page_sentinel_and_empty_string_normalized_to_none():
     doc = _doc("d:0", section_heading="", page_start=-1, page_end=-1, anchor="")
     rc = retriever._to_retrieved_chunk(doc, 0.5)

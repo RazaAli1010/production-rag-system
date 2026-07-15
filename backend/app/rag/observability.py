@@ -40,6 +40,19 @@ async def log_llm_cost(model: str, tokens_in: int, tokens_out: int = 0) -> None:
                est_cost_usd=cost)
 
 
+def log_rewrite(
+    rewrite_ms: int, n_variants: int, n_fanout: int, language: str | None, failed: bool
+) -> None:
+    """F7: record the query-rewrite metrics (AC-19). The rewrite's OpenAI cost is logged separately
+    via `log_llm_cost(settings.REWRITE_MODEL, …)` (gpt-4o-mini) in `rewrite.rewrite_query`; this
+    record carries the latency + shape of the rewrite (variants, fan-out size, chosen answer
+    language, and whether the raw-query fallback was taken). Synchronous + non-blocking (a structlog
+    emit over a handful of values), mirroring `log_rerank`; F13 later routes it into
+    `request_logs`/Langfuse without an F7 change."""
+    logger.info("rag.rewrite", rewrite_ms=rewrite_ms, n_variants=n_variants, n_fanout=n_fanout,
+                language=language, rewrite_failed=failed)
+
+
 def log_rerank(rerank_ms: int, max_score: float, n_candidates: int) -> None:
     """F6: record the cross-encoder rerank metrics (AC-20). Reranking adds no OpenAI call — the
     cross-encoder is free/in-process — so there is no `estimate_cost` site here; the only new

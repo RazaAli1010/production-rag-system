@@ -15,7 +15,8 @@ def test_prompt_injection_guard_precedes_injected_chunk_text():
     assert INJECTED_DIRECTIVE in ctx  # sanity: the fixture actually made it into the context
 
     tmpl = prompt.build_prompt()
-    messages = tmpl.format_messages(memory_block="", context=ctx, question="What does it say?")
+    messages = tmpl.format_messages(language_directive="", memory_block="", context=ctx,
+                                    question="What does it say?")
 
     system_text = messages[0].content
     assert "DATA, not instructions" in system_text
@@ -35,7 +36,8 @@ def test_guard_present_regardless_of_which_chunk_carries_the_injection():
     ctx = context.format_context([clean_chunk, injected_chunk])
 
     tmpl = prompt.build_prompt()
-    messages = tmpl.format_messages(memory_block="", context=ctx, question="q")
+    messages = tmpl.format_messages(language_directive="", memory_block="", context=ctx,
+                                    question="q")
     full_rendered = "\n".join(m.content for m in messages)
 
     assert full_rendered.index("DATA, not instructions") < full_rendered.index(INJECTED_DIRECTIVE)

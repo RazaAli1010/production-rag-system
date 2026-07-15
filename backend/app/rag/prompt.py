@@ -22,7 +22,7 @@ Rules:
 - Respond in the same language/register as the question (including code-switched Urdu/English).
 - Never quote more than 25 words verbatim from any single source."""
 
-HUMAN_TEMPLATE = """{memory_block}Numbered context:
+HUMAN_TEMPLATE = """{language_directive}{memory_block}Numbered context:
 {context}
 
 Question: {question}"""
@@ -33,6 +33,19 @@ def build_prompt() -> ChatPromptTemplate:
         ("system", SYSTEM_PROMPT),
         ("human", HUMAN_TEMPLATE),
     ])
+
+
+def render_language_directive(language: str | None) -> str:
+    """F7: the answer language is passed EXPLICITLY from the rewrite result (AC-9), not left to the
+    model to infer. Empty string when `language is None` (rewrite off/failed) — the SYSTEM_PROMPT's
+    "respond in the same language/register as the question" rule then stands unchanged (no
+    regression). The `{language_directive}` slot exists on `HUMAN_TEMPLATE` now so F7 needs no
+    further prompt-file change."""
+    if language == "en":
+        return "Answer in clear English.\n"
+    if language == "ur-mix":
+        return "Answer in the same code-switched Urdu/English register as the question.\n"
+    return ""
 
 
 def render_memory_block(memory: MemoryContext | None) -> str:

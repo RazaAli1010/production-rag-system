@@ -10,7 +10,7 @@ import asyncio
 
 from app.core.contracts import RetrievedChunk
 from app.evals.schemas import EvalRecord, MetricValue, SuiteResult
-from app.rag import retriever as retriever_mod
+from app.rag import rewrite as rewrite_mod
 from app.rag.flags import apply_flags
 
 # Tags that name a measurable retrieval slice (AC-7). `out_of_corpus` is not here — it's excluded.
@@ -56,9 +56,14 @@ async def run_retrieval(
     *,
     retrieve=None,
 ) -> SuiteResult:
-    # Resolve the seam at call time (not a def-time default) so monkeypatching `retriever.retrieve`
-    # in an end-to-end run.main test takes effect, while direct unit tests can still inject a spy.
-    retrieve = retrieve or retriever_mod.retrieve
+    # Resolve the seam at call time (not a def-time default) so monkeypatching the seam in an
+    # end-to-end run.main test takes effect, while direct unit tests can still inject a spy. F7: the
+    # default seam is now `rewrite.retrieve`, which delegates verbatim to `retriever.retrieve` when
+    # `ENABLE_QUERY_REWRITE` is off — so baseline/f5/f6 runs are byte-for-byte unchanged, and a
+    # `query_rewrite=on` run re-measures hit@k/MRR over the rewritten multi-query order with no
+    # scoring change. `rewrite.retrieve` accepts the same (query, k, namespace, settings) positional
+    # args (memory defaults None — the harness has no session).
+    retrieve = retrieve or rewrite_mod.retrieve
     # F5: this is the one suite that calls the seam directly (not via answer()), so reflect the
     # hybrid toggle onto settings here — the wiring the F4 comment reserved ("retrieve() reads
     # toggles from settings (F5+)"). Scoring is unchanged; only the retrieval mode is toggled.

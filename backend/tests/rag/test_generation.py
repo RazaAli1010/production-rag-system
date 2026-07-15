@@ -20,7 +20,8 @@ async def test_generate_chain_streams_tokens_reassembling_full_answer():
     fake_llm = GenericFakeChatModel(messages=iter([AIMessage(content=full_answer)]))
     chain = build_generate_chain(fake_llm)
 
-    chunk_input = {"chunks": [_chunk(0)], "memory_block": "", "question": "probation policy?"}
+    chunk_input = {"chunks": [_chunk(0)], "memory_block": "", "question": "probation policy?",
+                   "language_directive": ""}
 
     tokens = []
     async for event in chain.astream_events(chunk_input, version="v2"):
@@ -37,7 +38,8 @@ async def test_generate_chain_driven_only_via_astream_events():
     # sufficient to get the full answer.
     fake_llm = GenericFakeChatModel(messages=iter([AIMessage(content="answer text")]))
     chain = build_generate_chain(fake_llm)
-    chunk_input = {"chunks": [_chunk(0)], "memory_block": "", "question": "q"}
+    chunk_input = {"chunks": [_chunk(0)], "memory_block": "", "question": "q",
+                   "language_directive": ""}
 
     collected = ""
     async for event in chain.astream_events(chunk_input, version="v2"):

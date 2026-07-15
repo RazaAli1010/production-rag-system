@@ -246,7 +246,8 @@ async def test_query_truncated_before_retrieval(monkeypatch, session):
 async def test_stream_chain_with_retry_retries_before_first_token():
     llm = FlakyThenSucceedsChatModel()
     chain = baseline.build_generate_chain(llm)
-    chunk_input = {"chunks": [_retrieved_chunk()], "memory_block": "", "question": "q"}
+    chunk_input = {"chunks": [_retrieved_chunk()], "memory_block": "", "question": "q",
+                   "language_directive": ""}
     settings = _settings(LLM_MAX_RETRIES=2)
 
     tokens = []
@@ -261,7 +262,8 @@ async def test_stream_chain_with_retry_retries_before_first_token():
 async def test_stream_chain_with_retry_raises_provider_error_on_exhaustion():
     llm = AlwaysFailsChatModel()
     chain = baseline.build_generate_chain(llm)
-    chunk_input = {"chunks": [_retrieved_chunk()], "memory_block": "", "question": "q"}
+    chunk_input = {"chunks": [_retrieved_chunk()], "memory_block": "", "question": "q",
+                   "language_directive": ""}
     settings = _settings(LLM_MAX_RETRIES=2)
 
     with pytest.raises(errors.ProviderError):
