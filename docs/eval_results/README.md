@@ -100,3 +100,33 @@ over-refuse — the prose-trained model scores in-corpus *code-switched* queries
 > Same as F5, the `ragas` / `refusal` / `latency` suites are not part of F6's gate; F6's gate is the
 > retrieval hit@k / MRR delta above. `rerank_ms` p50 stays well under the 300 ms budget (CPU,
 > 12 pairs, single batched `score` call off the event loop).
+
+## F8 — Context compression · gate: `f8-compression-after` vs `f7-rewrite-after`
+
+Delta report: [`f8-compression-after-vs-f7-rewrite-after.md`](f8-compression-after-vs-f7-rewrite-after.md)
+(`--suite all`, same 588-chunk index as `f7-rewrite-after`, `--flags hybrid=on,rerank=on,query_rewrite=on,compression=on`).
+Post-rerank / pre-generation compression drops low-relevance + duplicate context and sentence-trims
+the one budget-overflow chunk, reusing the F6 cross-encoder (no new model call). Reproduce:
+
+```bash
+cd backend && set -a && . ./.env && set +a   # RAGAS/generation read OPENAI_API_KEY from the env
+EVAL_LATENCY_REQUESTS=30 python -m app.evals.run --suite all \
+    --flags hybrid=on,rerank=on,query_rewrite=on,compression=off,memory=off --label f7-rewrite-after --yes
+EVAL_LATENCY_REQUESTS=30 python -m app.evals.run --suite all \
+    --flags hybrid=on,rerank=on,query_rewrite=on,compression=on,memory=off  --label f8-compression-after --yes
+python -m app.evals.run --label f8-compression-after --compare f7-rewrite-after
+```
+
+**Result (overall):** **22.8% mean context-token reduction** (aggregate over 143 compressed
+generations, from the `rag.compression` logs) with **faithfulness UP 0.868 → 0.881 (+0.013 ▲)** —
+removing filler shrinks the ungrounded-claim surface. **context_precision flat** (−0.001),
+**retrieval hit@k / MRR unchanged** (Δ = 0 — compression is post-retrieval), **p95 latency −2.8 s**.
+Token reduction lands just under the 25% aspiration → **documented, not re-tuned**: the tradeoff is
+**answer_relevancy −0.080 ▼** (fewer chunks → slightly less complete answers), so a more aggressive
+floor to chase the last 2 points would deepen that regression. Ships **default-off**
+(`ENABLE_COMPRESSION=false`), A/B-gated; the faithfulness + latency wins make it safe to enable.
+
+> Absolute latencies (~38–41 s p95) are inflated by OpenAI rate-limiting on the test tier; the
+> **delta** is the comparable signal. `EVAL_RAGAS_MAX_WORKERS=4` caps the judge fan-out (the library
+> default storms a rate-limited tier into a stall). The `f7-rewrite-after` baseline was re-run to add
+> the ragas/latency rows (the prior commit was retrieval-only) — see the delta's provenance note.
