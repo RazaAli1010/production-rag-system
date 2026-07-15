@@ -53,6 +53,25 @@ def log_rewrite(
                 language=language, rewrite_failed=failed)
 
 
+def log_compression(
+    tokens_before: int,
+    tokens_after: int,
+    chunks_before: int,
+    chunks_after: int,
+    sentences_dropped: int,
+    compression_ms: int,
+) -> None:
+    """F8: record the context-compression metrics (AC-12). Compression adds no OpenAI call — the F6
+    cross-encoder is reused for sentence scoring — so there is no `estimate_cost` site here; the cost
+    win surfaces as fewer generation input tokens through the existing `log_llm_cost`. Synchronous +
+    non-blocking (a structlog emit over a handful of numbers), mirroring `log_rerank`/`log_rewrite`;
+    F13 later routes it into `request_logs`/Langfuse without an F8 change."""
+    logger.info("rag.compression", tokens_before=tokens_before, tokens_after=tokens_after,
+                chunks_before=chunks_before, chunks_after=chunks_after,
+                chunks_dropped=chunks_before - chunks_after, sentences_dropped=sentences_dropped,
+                compression_ms=compression_ms)
+
+
 def log_rerank(rerank_ms: int, max_score: float, n_candidates: int) -> None:
     """F6: record the cross-encoder rerank metrics (AC-20). Reranking adds no OpenAI call — the
     cross-encoder is free/in-process — so there is no `estimate_cost` site here; the only new

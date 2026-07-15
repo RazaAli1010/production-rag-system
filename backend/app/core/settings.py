@@ -126,6 +126,15 @@ class Settings(BaseSettings):
     REWRITE_TIMEOUT_S: float = 5.0
     # RERANK_TOP_N / RERANK_CANDIDATE_K / HYBRID_* are reused by the fan-out, NOT redefined.
 
+    # --- Context compression (F8) ---
+    ENABLE_COMPRESSION: bool = False  # prod/request toggle; False ≡ f7-rewrite-after gen path (AC-16)
+    COMPRESSION_SCORE_FLOOR: float = 0.25  # drop reranked chunks below this calibrated score (AC-1)
+    COMPRESSION_MIN_CHUNKS: int = 2  # never leave a non-refused query fewer than this many (AC-2)
+    COMPRESSION_TOKEN_BUDGET: int = 2200  # greedy-fill budget; overflow chunk sentence-trimmed (AC-6/7)
+    COMPRESSION_DEDUPE_JACCARD: float = 0.7  # 5-gram Jaccard above this drops the lower-scored dup (AC-4)
+    COMPRESSION_DEDUPE_NGRAM: int = 5  # word-level n-gram size for the dedupe similarity (AC-4)
+    # RERANK_MODEL / RERANK_DEVICE reused for sentence scoring, NOT redefined.
+
     # --- RAG baseline chain (F3) ---
     LLM_MODEL: str = "gpt-4o-mini"  # gpt-4o is F3's "deep mode" toggle, not wired until later
     LLM_MAX_RETRIES: int = 2  # 429/5xx retry budget (AC-21)
