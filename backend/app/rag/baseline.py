@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 
 from app.core.contracts import AnswerResponse, MemoryContext
 from app.rag import citations as citations_mod
+from app.rag import compression as compression_mod
 from app.rag import context, observability, prompt, refusal
 from app.rag import errors as errors_mod
 from app.rag import flags as flags_mod
@@ -160,6 +161,15 @@ async def _pipeline_events(
         yield SSEEvent(event="meta", data=response.model_dump(exclude={"answer"}))
         yield SSEEvent(event="done", data={})
         return
+
+    # F8: compress the (non-refused) reranked context before generation — CLAUDE.md order
+    # `rerank → refusal gate → compress → generate`. Flag off ≡ f7-rewrite-after (no-op). Scoring
+    # uses the F7 normalized query (same query F6 reranked against) when rewrite ran, else the raw
+    # query. `chunks` is reassigned in place, so the SAME compressed list drives format_context, the
+    # cost token-count, and parse_citations — [n] stays 1:1. No new SSE stage (internal step).
+    if settings.ENABLE_COMPRESSION:
+        scoring_query = rewrite_result.normalized if rewrite_result else query
+        chunks = await compression_mod.compress_chunks(scoring_query, chunks, settings)
 
     yield stage_event("generating", "started")
     memory_block = prompt.render_memory_block(memory)
