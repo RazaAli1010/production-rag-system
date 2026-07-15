@@ -14,6 +14,7 @@ from app.core.contracts import (
     MemoryContext,
     PipelineFlags,
     RetrievedChunk,
+    RewriteResult,
     StageEvent,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "MemoryContext",
     "PipelineFlags",
     "RetrievedChunk",
+    "RewriteResult",
     "StageEvent",
 ]

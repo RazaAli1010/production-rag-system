@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     # emits a single unbounded logit, so the default is True; the T6 activation sanity check
     # confirms (or flips) this against the real model so a double-sigmoid can't corrupt the gate.
     RERANK_APPLY_SIGMOID: bool = True
-    # Calibrated refusal gate (AC-12/AC-13): refuse when max_rerank_score < this. TUNED (not guessed)
+    # Calibrated refusal gate (AC-12/AC-13): refuse if max_rerank_score < this. TUNED (not guessed)
     # on the 75-record eval set at the F6 gate: out-of-corpus queries all score ≤ 0.005 (the English
     # cross-encoder finds no relevant chunk), so a Youden-optimal 0.01 refuses 100% of out-of-corpus
     # while still answering ~86% of in-corpus. A higher value (e.g. 0.5) over-refuses because the
@@ -110,6 +110,21 @@ class Settings(BaseSettings):
     # docs/eval_results/f6-rerank-after-vs-f5-hybrid-after.md.
     REFUSAL_RERANK_THRESHOLD: float = 0.01
     # HYBRID_FUSED_TOP_K (above, F5) is reused as the hybrid rerank input pool — NOT redefined.
+
+    # --- Query rewrite (F7) ---
+    ENABLE_QUERY_REWRITE: bool = False  # prod/request toggle; False ≡ f6-rerank-after path (AC-15)
+    # The rewrite LLM — the project PRIMARY model, gpt-4o-mini; gpt-4o "deep mode" is NOT used for
+    # rewrite (AC-1/AC-20). Explicit Settings value so it is overridable and asserted in tests.
+    REWRITE_MODEL: str = "gpt-4o-mini"
+    REWRITE_TEMPERATURE: float = 0.0  # deterministic rewrite (AC-1)
+    REWRITE_MAX_TOKENS: int = 200  # JSON output cap (AC-1)
+    REWRITE_NUM_VARIANTS: int = 2  # multi-query paraphrases emitted alongside `normalized` (AC-2)
+    REWRITE_RRF_K: int = 60  # union-across-queries RRF constant; merged = Σ 1/(60 + rank) (AC-6)
+    REWRITE_MERGED_TOP_K: int = 12  # merged pool cap fed to rerank (= RERANK_CANDIDATE_K)
+    REWRITE_FANOUT_CONCURRENCY: int = 3  # Semaphore bound over [normalized, v1, v2] fan-out (AC-5)
+    # rewrite call timeout → raw-query fallback; guards the ≤600ms p50 budget (AC-8/AC-10)
+    REWRITE_TIMEOUT_S: float = 5.0
+    # RERANK_TOP_N / RERANK_CANDIDATE_K / HYBRID_* are reused by the fan-out, NOT redefined.
 
     # --- RAG baseline chain (F3) ---
     LLM_MODEL: str = "gpt-4o-mini"  # gpt-4o is F3's "deep mode" toggle, not wired until later

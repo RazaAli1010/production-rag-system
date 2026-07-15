@@ -36,6 +36,30 @@ class RetrievedChunk(BaseModel):
     rerank_score: float | None = None
 
 
+class RewriteResult(BaseModel):
+    """Transient, per-query — never persisted (mirrors `RetrievedChunk`). The output of F7's single
+    `gpt-4o-mini` rewrite call: `normalized` (cleaned/translated/condensed standalone query),
+    `variants` (paraphrases for multi-query fan-out), `language` (passed explicitly to generation).
+    `failed=True` marks the raw-query fallback taken when the rewrite call fails (design.md §4)."""
+
+    normalized: str
+    variants: list[str] = []
+    language: Literal["en", "ur-mix"] | None = None
+    failed: bool = False
+
+    def fanout_queries(self) -> list[str]:
+        """`dedupe([normalized, *variants])` preserving order — the retrieval fan-out set (AC-5).
+        Drops blank entries so a degenerate variant never becomes an empty retrieval query."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for q in [self.normalized, *self.variants]:
+            q = (q or "").strip()
+            if q and q not in seen:
+                seen.add(q)
+                out.append(q)
+        return out
+
+
 class Citation(BaseModel):
     """Resolved `[n]` marker — or a pre-LLM "you might check" suggestion (AC-7)."""
 

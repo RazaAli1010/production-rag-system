@@ -18,7 +18,7 @@ from app.rag import context, observability, prompt, refusal
 from app.rag import errors as errors_mod
 from app.rag import flags as flags_mod
 from app.rag import hybrid as hybrid_mod
-from app.rag import retriever as retriever_mod
+from app.rag import rewrite as rewrite_mod
 from app.rag.events import SSEEvent, stage_event
 from app.rag.schemas import PipelineFlags
 
@@ -110,8 +110,13 @@ async def _pipeline_events(
     t0 = time.monotonic()
     yield stage_event("searching", "started")
     try:
+        # F7: the outer retrieval seam is now `rewrite.retrieve` (still inside the `searching`
+        # stage — no new SSE stage). With `ENABLE_QUERY_REWRITE` off it delegates verbatim to
+        # `retriever.retrieve` (byte-for-byte f6-rerank-after); with it on it rewrites the query
+        # via gpt-4o-mini, fans out, union+RRF-merges, and single-reranks. `memory` is threaded
+        # through so history-aware condensation activates automatically once F17 populates it.
         chunks = await errors_mod.call_with_retry(
-            lambda: retriever_mod.retrieve(query, k, namespace, settings), settings=settings
+            lambda: rewrite_mod.retrieve(query, k, namespace, settings, memory), settings=settings
         )
     except Exception as exc:
         # Any unrecoverable retrieval failure (ProviderError after retry exhaustion, or a
@@ -123,6 +128,13 @@ async def _pipeline_events(
     # F5: hybrid retrieval sets this out-of-band when it fell back to BM25-only (AC-14/AC-17);
     # dense_only/bm25_only paths never set it, so this reads False there.
     degraded = hybrid_mod.was_degraded()
+    # F7: read the out-of-band rewrite result (None when rewrite was off/not run) to pass the answer
+    # language EXPLICITLY into the generation prompt (AC-9). None → empty directive → the existing
+    # "respond in the question's language" system-prompt rule stands unchanged.
+    rewrite_result = rewrite_mod.last_rewrite()
+    language_directive = prompt.render_language_directive(
+        rewrite_result.language if rewrite_result else None
+    )
     yield stage_event("searching", "done", ms=int((time.monotonic() - t0) * 1000))
 
     if refusal.pre_llm_gate(chunks, settings):
@@ -151,7 +163,8 @@ async def _pipeline_events(
 
     yield stage_event("generating", "started")
     memory_block = prompt.render_memory_block(memory)
-    chain_input = {"chunks": chunks, "memory_block": memory_block, "question": query}
+    chain_input = {"chunks": chunks, "memory_block": memory_block, "question": query,
+                   "language_directive": language_directive}
     llm = build_llm(settings)
     chain = build_generate_chain(llm)
     handler = observability.langfuse_handler(session_id=None, settings=settings)
@@ -172,7 +185,8 @@ async def _pipeline_events(
         return
     yield stage_event("generating", "done")
 
-    full_prompt = prompt.SYSTEM_PROMPT + context.format_context(chunks) + memory_block + query
+    full_prompt = (prompt.SYSTEM_PROMPT + language_directive + context.format_context(chunks)
+                   + memory_block + query)
     tokens_in = len(_ENC.encode(full_prompt))
     await observability.log_llm_cost(settings.LLM_MODEL, tokens_in, tokens_out)
 

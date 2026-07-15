@@ -93,18 +93,19 @@ def resolve_mode(settings) -> str:
     return "hybrid" if settings.ENABLE_HYBRID else "dense_only"
 
 
-async def retrieve(
+async def gather_candidate_pool(
     query: str, k: int, namespace: str | None, settings
 ) -> list[RetrievedChunk]:
-    """The F3→F5→F6 seam (signature unchanged, AC-16/F6 AC-19): gather the candidate pool for the
-    effective retrieval mode, then optionally rerank it (F6) before truncating to `k`.
+    """The pre-rerank candidate pool for the effective retrieval mode (F5). Factored out of
+    `retrieve` (F7) so both the single-query seam AND F7's multi-query fan-out
+    (`rewrite.multi_query_retrieve`, which calls this once per rewritten query before a single
+    shared rerank) share one pool-gathering code path.
 
-    `dense_only` is byte-for-byte F3 (`baseline`). `hybrid` fuses BM25+dense (F5). `bm25_only` is an
-    eval diagnostic (AC-13). When `ENABLE_RERANK` is on (F6), the candidate pool is widened to
-    `RERANK_CANDIDATE_K` (so the cross-encoder has more than `k` to re-order — hybrid already
-    returns the ≤`HYBRID_FUSED_TOP_K` fused pool) and reranked to `RERANK_TOP_N`; the count to
-    generation stays `k` (=5). With rerank off this is byte-for-byte the F5 `pool[:k]` path (F6
-    AC-17). `hybrid`/`rerank` imported lazily to avoid an import cycle (both import this module)."""
+    `dense_only` is byte-for-byte F3 (`baseline`); `hybrid` fuses BM25+dense (F5); `bm25_only` is
+    an eval diagnostic (AC-13). When `ENABLE_RERANK` is on the pool is widened to
+    `RERANK_CANDIDATE_K` (so rerank has more than `k` to re-order — hybrid already returns the
+    ≤`HYBRID_FUSED_TOP_K` fused pool); with rerank off, `pool_k == k`. `hybrid` imported lazily to
+    avoid the retriever↔hybrid import cycle."""
     mode = resolve_mode(settings)
     # F6: widen the candidate pool when reranking so the cross-encoder can re-order more than `k`
     # (hybrid_retrieve already returns the fused pool ignoring `k`). With rerank off, pool_k == k so
@@ -112,14 +113,25 @@ async def retrieve(
     pool_k = settings.RERANK_CANDIDATE_K if settings.ENABLE_RERANK else k
 
     if mode == "dense_only":
-        pool = await dense_retrieve(query, pool_k, namespace, settings)
-    else:
-        from app.rag import hybrid  # lazy: breaks the retriever↔hybrid import cycle
+        return await dense_retrieve(query, pool_k, namespace, settings)
 
-        if mode == "bm25_only":
-            pool = await hybrid.sparse_only(query, pool_k, namespace, settings)
-        else:
-            pool = await hybrid.hybrid_retrieve(query, k, namespace, settings)  # already ≤12
+    from app.rag import hybrid  # lazy: breaks the retriever↔hybrid import cycle
+
+    if mode == "bm25_only":
+        return await hybrid.sparse_only(query, pool_k, namespace, settings)
+    return await hybrid.hybrid_retrieve(query, k, namespace, settings)  # already ≤12
+
+
+async def retrieve(
+    query: str, k: int, namespace: str | None, settings
+) -> list[RetrievedChunk]:
+    """The F3→F5→F6 seam (signature unchanged, AC-16/F6 AC-19): gather the candidate pool for the
+    effective retrieval mode, then optionally rerank it (F6) before truncating to `k`.
+
+    With rerank off this is byte-for-byte the F5 `pool[:k]` path (F6 AC-17); the count to generation
+    stays `k` (=5). `rerank` imported lazily to avoid an import cycle (it imports this module). F7
+    wraps this seam one layer out in `rewrite.retrieve` when `ENABLE_QUERY_REWRITE` is on."""
+    pool = await gather_candidate_pool(query, k, namespace, settings)
 
     if settings.ENABLE_RERANK:
         from app.rag import rerank  # lazy: breaks the retriever↔rerank import cycle
