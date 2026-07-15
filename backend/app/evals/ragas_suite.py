@@ -93,13 +93,16 @@ def _build_metrics():
     }
 
 
-def _evaluate_sync(samples, llm, emb):
+def _evaluate_sync(samples, llm, emb, max_workers):
     """Blocking RAGAS call — only ever invoked inside `anyio.to_thread.run_sync` (AC-12)."""
     from ragas import EvaluationDataset, SingleTurnSample, evaluate
+    from ragas.run_config import RunConfig
 
     metrics = _build_metrics()
     dataset = EvaluationDataset(samples=[SingleTurnSample(**s) for s in samples])
-    result = evaluate(dataset=dataset, metrics=list(metrics.values()), llm=llm, embeddings=emb)
+    # Bounded fan-out (EVAL_RAGAS_MAX_WORKERS): the library default overwhelms a rate-limited tier.
+    result = evaluate(dataset=dataset, metrics=list(metrics.values()), llm=llm, embeddings=emb,
+                      run_config=RunConfig(max_workers=max_workers))
     df = result.to_pandas()
     scores = {name: float(df[col].mean()) for name, col in _METRIC_COLUMNS.items() if col in df}
     try:
@@ -140,7 +143,7 @@ async def run_ragas(
 
     llm, emb = _build_judge(settings)
     scores, tokens = await anyio.to_thread.run_sync(
-        functools.partial(_evaluate_sync, list(samples), llm, emb)
+        functools.partial(_evaluate_sync, list(samples), llm, emb, settings.EVAL_RAGAS_MAX_WORKERS)
     )
 
     if tokens is not None:

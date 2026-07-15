@@ -168,6 +168,10 @@ class Settings(BaseSettings):
         "faithfulness", "answer_relevancy", "context_precision", "context_recall",
     ]
     EVAL_RAGAS_JUDGE_MULTIPLIER: float = 4.0  # judge prompts per record, for cost preview (AC-11)
+    # Cap RAGAS evaluate()'s internal judge concurrency. The library default (16) storms a
+    # rate-limited OpenAI tier into a retry-backoff stall (80+ hung connections); 4 matches the
+    # generation fan-out and completes reliably. Same for every label, so deltas stay comparable.
+    EVAL_RAGAS_MAX_WORKERS: int = 4
     EVAL_LATENCY_REQUESTS: int = 100  # AC-16
     EVAL_LATENCY_ENDPOINT: str | None = None  # F11 /api/ask URL; None => in-process astream (AC-17)
     EVAL_CONCURRENCY: int = 4  # bounded async fan-out over records (Semaphore)
