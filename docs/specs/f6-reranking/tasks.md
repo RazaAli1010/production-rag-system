@@ -125,7 +125,7 @@ Run the F4 harness against the rerank path and commit the delta report:
 # (design §2) — the fused pool is identical, so f5-hybrid-after numbers stay comparable.
 
 python -m app.evals.run --suite all \
-    --flags hybrid=on,rerank=on,query_rewrite=off,compression=off,memory=off \
+    --flags hybrid=on,rerank=on,memory=off \
     --label f6-rerank-after --yes
 
 python -m app.evals.run --label f6-rerank-after --compare f5-hybrid-after
@@ -147,6 +147,7 @@ feature is not done until this delta table is committed.**
 ---
 
 **Gate label sequence (fixed):** `baseline` → `f5-hybrid-after` → **`f6-rerank-after`** →
-`f7-rewrite-after` → … F6's "before" is the `f5-hybrid-after` report; F7's "before" will be
-`f6-rerank-after`. Every README benchmark row for reranking maps to the `f6-rerank-after` label,
-which maps to a git SHA + index manifest, so all numbers are reproducible.
+`f9-cache-after` → … F6's "before" is the `f5-hybrid-after` report, and F6 **closes the retrieval
+track** — the former `f7-rewrite-after` / `f8-compression-after` gates are dropped (retrieval
+enhancement ends at reranking). Every README benchmark row for reranking maps to the
+`f6-rerank-after` label, which maps to a git SHA + index manifest, so all numbers are reproducible.
