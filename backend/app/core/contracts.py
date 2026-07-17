@@ -88,6 +88,10 @@ class MemoryContext(BaseModel):
     summary: str | None = None
     pairs: list[ChatMessage] = []
     summarized: bool = False
+    # F17: additive with defaults (same pattern as F9's AnswerResponse.tokens_in/out). Pre-F17
+    # producers (F3/F4/F9) construct MemoryContext without these; the F17 window assembler sets them.
+    window_pairs: int = 0  # window size actually used this turn (AC-19/20 assert on it)
+    effective_tokens: int = 0  # tokens of summary + pairs (over-budget test asserts < budget)
 
 
 class StageEvent(BaseModel):

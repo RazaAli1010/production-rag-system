@@ -184,6 +184,7 @@ async def _pipeline_events(
     session,
     settings,
     sessionmaker=None,
+    session_id: str | None = None,
 ) -> AsyncIterator[SSEEvent]:
     """The single source of pipeline truth `astream`/`answer` both consume (AC-19). Emits the
     ordered `stage*` -> `token*` -> `citations` -> `meta` -> `done`|`error` sequence."""
@@ -258,8 +259,10 @@ async def _pipeline_events(
             refused=True,
             refusal_reason="low_retrieval_confidence",
             pipeline_flags=flags,
-            session_id=None,
-            memory_summarized=False,
+            # F17: surfaced from the request (was hardcoded None/False). memory-off callers pass
+            # session_id=None and memory=None, so this stays byte-for-byte f9-cache-after (AC-16/33).
+            session_id=session_id,
+            memory_summarized=(memory.summarized if memory else False),
             cache_hit=False,
             # F9/AC-27b: the prompt tokens the skipped generation WOULD have cost, mirroring the
             # log_llm_cost call above. Refusals are never cached (AC-16), so this is telemetry
@@ -288,7 +291,7 @@ async def _pipeline_events(
                    "language_directive": language_directive}
     llm = build_llm(settings)
     chain = build_generate_chain(llm)
-    handler = observability.langfuse_handler(session_id=None, settings=settings)
+    handler = observability.langfuse_handler(session_id=session_id, settings=settings)
     config = {"callbacks": [handler]} if handler else {}
 
     answer_text = ""
@@ -330,8 +333,8 @@ async def _pipeline_events(
         refused=refused,
         refusal_reason="no_grounded_claims" if refused else None,
         pipeline_flags=flags,
-        session_id=None,
-        memory_summarized=False,
+        session_id=session_id,
+        memory_summarized=(memory.summarized if memory else False),
         cache_hit=False,
         # F9/AC-27b: surfaced rather than discarded. These are the counts already computed above
         # for log_llm_cost; carrying them on the response is what lets a later cache HIT report the
@@ -370,12 +373,16 @@ async def astream(
     session,
     settings,
     sessionmaker=None,
+    session_id: str | None = None,
 ) -> AsyncIterator[SSEEvent]:
     """`sessionmaker` is F9's: the cache opens its OWN short-lived sessions for lookup and for the
     write-behind task, which outlives the request's `session`. Defaults to the app-wide one; tests
-    and the F4 harness inject theirs. Unused when `ENABLE_CACHE` is off."""
+    and the F4 harness inject theirs. Unused when `ENABLE_CACHE` is off.
+
+    `session_id` is F17's: threaded onto the response + Langfuse span when memory is active; `None`
+    for stateless/harness calls, keeping the path byte-for-byte f9-cache-after (AC-16/33)."""
     async for ev in _pipeline_events(query, k, namespace, flags or PipelineFlags(), memory,
-                                      session, settings, sessionmaker):
+                                      session, settings, sessionmaker, session_id=session_id):
         yield ev
 
 
@@ -389,6 +396,7 @@ async def answer(
     session,
     settings,
     sessionmaker=None,
+    session_id: str | None = None,
 ) -> AnswerResponse:
     """Collects `_pipeline_events` into the terminal `meta` event's `AnswerResponse` (AC-20) —
     `answer` text is reassembled from the accumulated `token` events since `meta` omits it (SSE
@@ -399,7 +407,7 @@ async def answer(
     full_answer_text = ""
     meta_payload = None
     async for ev in astream(query, k, namespace, flags, memory, session=session, settings=settings,
-                            sessionmaker=sessionmaker):
+                            sessionmaker=sessionmaker, session_id=session_id):
         if ev.event == "token":
             full_answer_text += ev.data["token"]
         elif ev.event == "meta":

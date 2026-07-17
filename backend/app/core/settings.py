@@ -185,6 +185,20 @@ class Settings(BaseSettings):
     CACHE_MAX_ENTRIES: int = 10_000
     # EMBED_MODEL / EMBED_DIM (F2) are reused for the query vector — NOT redefined.
 
+    # --- Session memory (F17) ---
+    ENABLE_MEMORY: bool = False  # prod/request toggle; False ≡ f9-cache-after single-turn (AC-33)
+    MEMORY_TOKEN_BUDGET: int = 50_000  # hard cap; crossing it shrinks the window (AC-20)
+    MEMORY_WINDOW_PAIRS: int = 5  # verbatim window under budget (AC-18/19)
+    MEMORY_KEEP_LAST_PAIRS: int = 2  # shrunken window once over budget (AC-20)
+    MEMORY_SUMMARIZE_EVERY_PAIRS: int = 3  # lazy-batch trigger for the summariser (AC-23)
+    MEMORY_SUMMARY_MAX_TOKENS: int = 600  # summary output cap (AC-23)
+    MEMORY_SUMMARY_MODEL: str = "gpt-4o-mini"  # project primary; NOT gpt-4o deep mode (AC-23)
+    MEMORY_SUMMARY_TEMPERATURE: float = 0.0  # deterministic summary
+    MEMORY_SUMMARY_TIMEOUT_S: float = 8.0  # summariser timeout → window-only fallback (AC-27)
+    MEMORY_SESSION_TITLE_MAX_CHARS: int = 60  # auto-title cap (AC-2)
+    MEMORY_ANON_MAX_MESSAGES: int = 30  # anonymous session message cap (AC-7)
+    MEMORY_ANON_TTL_DAYS: int = 7  # anonymous inactivity TTL, pruned by the F12 job (AC-7)
+
     # --- RAG baseline chain (F3) ---
     LLM_MODEL: str = "gpt-4o-mini"  # gpt-4o is F3's "deep mode" toggle, not wired until later
     LLM_MAX_RETRIES: int = 2  # 429/5xx retry budget (AC-21)
