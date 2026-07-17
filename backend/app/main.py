@@ -2,7 +2,7 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api import auth, internal
+from app.api import ask, auth, internal, sessions
 from app.core.exceptions import AuthError
 
 logger = structlog.get_logger(__name__)
@@ -11,6 +11,8 @@ app = FastAPI(title="CampusRAG")
 
 app.include_router(auth.router)
 app.include_router(internal.router)
+app.include_router(sessions.router)  # F17
+app.include_router(ask.router)  # F17
 
 
 @app.exception_handler(AuthError)

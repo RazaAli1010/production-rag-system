@@ -355,6 +355,81 @@ jobs:
           fi
           ruff check app/caching
 
+  memory:
+    name: F17 session memory — sessions/ask tests, window logic, async guard
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
+      OPENAI_API_KEY: sk-ci-only-placeholder
+      PINECONE_API_KEY: pc-ci-only-placeholder
+      PINECONE_INDEX: campus-rag-ci
+      # The summariser LLM is an injected fake in every test — CI makes no OpenAI call.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Memory tests (the gpt-4o-mini summariser is an injected fake; sessions/messages are the
+          F12 tables, no new migration)
+        working-directory: backend
+        run: pytest tests/memory -v
+
+      - name: Async-guard (no sync embed/invoke/stream, blocking requests, sync redis, or
+          create_engine in app/memory — the summariser must use .ainvoke())
+        working-directory: backend
+        run: |
+          set -e
+          if grep -RnE "\.embed_documents\(|\.embed_query\(|import requests\b|from redis import(?!\.asyncio)|^\s*import redis$" app/memory; then
+            echo "Sync embedding call / blocking requests / sync redis import found in app/memory — forbidden by the async-everywhere rule." >&2
+            exit 1
+          fi
+          if grep -RnE "\.invoke\(" app/memory --include="*.py"; then
+            echo "Sync .invoke() call found in app/memory — use .ainvoke() instead." >&2
+            exit 1
+          fi
+          if grep -RnE "(?<!a)\.stream\(" app/memory --include="*.py"; then
+            echo "Sync .stream() call found in app/memory — use .astream()/.astream_events() instead." >&2
+            exit 1
+          fi
+          if grep -RnE "create_engine\(" app/memory; then
+            echo "Sync create_engine() found in app/memory — use create_async_engine instead." >&2
+            exit 1
+          fi
+          ruff check app/memory
+
   evals:
     name: F4 evaluation harness — suite tests, async guard
     runs-on: ubuntu-latest
