@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user, get_current_user_optional
 from app.auth.schemas import Principal
+from app.core.ratelimit import rate_limit_dep
 from app.core.settings import settings
 from app.db.enums import MessageRole
 from app.db.session import get_session
@@ -60,7 +61,8 @@ async def _resolve_owner(
     return s
 
 
-@router.post("", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=SessionOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(rate_limit_dep)])
 async def create_session(
     response: Response,
     principal: Principal | None = Depends(get_current_user_optional),

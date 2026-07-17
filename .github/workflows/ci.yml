@@ -583,3 +583,85 @@ jobs:
             echo "passlib/CryptContext used outside app/core/security.py — route hashing through hash_password/verify_password so it stays off the event loop." >&2
             exit 1
           fi
+
+  api:
+    name: F11 API hardening — validation, rate limit, envelope, health, async guards
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
+      OPENAI_API_KEY: sk-ci-only-placeholder
+      PINECONE_API_KEY: pc-ci-only-placeholder
+      PINECONE_INDEX: campus-rag-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: API tests (Postgres is real — health SELECT 1, /api/documents and /api/history hit it;
+          the pipeline and Redis are faked, so the job needs no OpenAI/Pinecone/Redis server. The
+          limiter's cross-worker guarantee is proved against a shared FakeRedis instance.)
+        working-directory: backend
+        run: pytest tests/api -v
+
+      - name: Async-guard (no sync SQLAlchemy, blocking requests, or sync redis in app/api|app/core —
+          the limiter and health probe use redis.asyncio / async SQLAlchemy only; the sync Pinecone
+          client is the one blocking call and must go through anyio.to_thread.run_sync)
+        working-directory: backend
+        run: |
+          set -e
+          if grep -RnE "import requests\b|from redis import(?!\.asyncio)|^\s*import redis$" app/api app/core/middleware.py app/core/errors.py app/core/ratelimit.py app/api/health.py; then
+            echo "Blocking requests / sync redis import found in the F11 surface — forbidden by the async-everywhere rule." >&2
+            exit 1
+          fi
+          if grep -RnE "create_engine\(" app/api app/core/middleware.py app/core/errors.py app/core/ratelimit.py; then
+            echo "Sync create_engine() found in the F11 surface — use create_async_engine instead." >&2
+            exit 1
+          fi
+          ruff check app/api app/core/middleware.py app/core/errors.py app/core/ratelimit.py
+
+      - name: No-migration guard (F11 adds NO Alembic revision — documents/request_logs/sessions/
+          messages were migrated by F12; AnswerResponse is a wire model. Autogenerate must be empty.)
+        working-directory: backend
+        run: |
+          set -e
+          python -m alembic revision --autogenerate -m "f11guard" --rev-id f11guard
+          GENERATED="app/db/migrations/versions/f11guard_f11guard.py"
+          if grep -qE "op\.(create_table|add_column|drop_column|alter_column|create_index|drop_table|drop_index|create_foreign|drop_constraint)" "$GENERATED"; then
+            echo "F11 produced a non-empty migration — it must add no schema change." >&2
+            cat "$GENERATED" >&2
+            exit 1
+          fi
+          rm -f "$GENERATED"

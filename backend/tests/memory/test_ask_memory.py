@@ -115,7 +115,7 @@ async def test_concurrent_ask_returns_409(client, authed, monkeypatch):
     lock = service.lock_for(sid)
     await lock.acquire()
     try:
-        r = await client.post("/api/ask", json={"question": "q", "session_id": str(sid)},
+        r = await client.post("/api/ask", json={"question": "qqq", "session_id": str(sid)},
                               headers=authed["headers"])
         assert r.status_code == 409
         assert r.json()["detail"] == "session_busy"
@@ -125,7 +125,7 @@ async def test_concurrent_ask_returns_409(client, authed, monkeypatch):
 
 async def test_missing_session_is_404(client, authed, monkeypatch):
     monkeypatch.setattr(ask, "astream", make_fake_astream(Recorder()))
-    r = await client.post("/api/ask", json={"question": "q", "session_id": str(uuid.uuid4())},
+    r = await client.post("/api/ask", json={"question": "qqq", "session_id": str(uuid.uuid4())},
                           headers=authed["headers"])
     assert r.status_code == 404
 
@@ -146,7 +146,8 @@ async def test_disconnect_persists_no_assistant(sessionmaker_, memory_settings, 
         await db.commit()
         lock = service.lock_for(s.id)
         await lock.acquire()
-        gen = ask._memory_events("q", s, db, lock)
+        req = ask.AskRequest(question="qqq")
+        gen = ask._memory_events("qqq", req, PipelineFlags(memory=True), s, db, lock)
         first = await gen.__anext__()
         assert first.event in ("stage", "token")
         await gen.aclose()  # disconnect before done
@@ -172,7 +173,7 @@ async def test_summarizer_failure_still_answers(client, authed, monkeypatch):
     sid = await _create_session(client, authed)
     await _seed_pairs(sid, 8)
 
-    r = await client.post("/api/ask", json={"question": "q9", "session_id": str(sid)},
+    r = await client.post("/api/ask", json={"question": "q9x", "session_id": str(sid)},
                           headers=authed["headers"])
     events = parse_sse(r.text)
     kinds = [e[0] for e in events]
@@ -195,7 +196,7 @@ async def test_sliding_window_turn9_last5_pairs(client, authed, monkeypatch):
     sid = await _create_session(client, authed)
     await _seed_pairs(sid, 8)
 
-    await client.post("/api/ask", json={"question": "q9", "session_id": str(sid)},
+    await client.post("/api/ask", json={"question": "q9x", "session_id": str(sid)},
                       headers=authed["headers"])
 
     contents = [m.content for m in rec.memory.pairs]
@@ -224,7 +225,7 @@ async def test_over_budget_shrinks_to_last2(client, authed, monkeypatch):
         s.total_tokens = 60_000
         await db.commit()
 
-    await client.post("/api/ask", json={"question": "q9", "session_id": str(sid)},
+    await client.post("/api/ask", json={"question": "q9x", "session_id": str(sid)},
                       headers=authed["headers"])
 
     contents = [m.content for m in rec.memory.pairs]

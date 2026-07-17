@@ -199,6 +199,17 @@ class Settings(BaseSettings):
     MEMORY_ANON_MAX_MESSAGES: int = 30  # anonymous session message cap (AC-7)
     MEMORY_ANON_TTL_DAYS: int = 7  # anonymous inactivity TTL, pruned by the F12 job (AC-7)
 
+    # --- API hardening (F11) ---
+    ENABLE_RATE_LIMIT: bool = True  # prod toggle; False ≡ F17 route, never 429 (AC-12/22)
+    CORS_ALLOW_ORIGINS: list[str] = []  # exact-origin allowlist; empty ⇒ no cross-origin (AC-15)
+    REQUEST_TIMEOUT_S: float = 30.0  # server-side ask timeout → SSE error / 504 (AC-17)
+    GZIP_MIN_BYTES: int = 500  # gzip threshold; SSE frames stay below it, so streaming is unaffected
+    HISTORY_PAGE_SIZE: int = 50  # GET /api/history page (AC-5)
+    RATE_LIMIT_WINDOW_S: int = 60  # fixed-window size for the Redis limiter (AC-8)
+    # F11 plumbs `deep=true` to this model by handing the pipeline a settings copy with LLM_MODEL
+    # overridden — no baseline.py change, since build_llm(settings) reads LLM_MODEL (AC-3).
+    LLM_DEEP_MODEL: str = "gpt-4o"
+
     # --- RAG baseline chain (F3) ---
     LLM_MODEL: str = "gpt-4o-mini"  # gpt-4o is F3's "deep mode" toggle, not wired until later
     LLM_MAX_RETRIES: int = 2  # 429/5xx retry budget (AC-21)

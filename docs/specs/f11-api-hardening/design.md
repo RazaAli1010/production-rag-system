@@ -172,11 +172,19 @@ def envelope(type_: str, message: str) -> dict:
 |---|---|---|---|
 | `RequestValidationError` (FastAPI) | 422 | `validation_error` | field errors, safe |
 | `RateLimited` (F11) | 429 | `rate_limited` | + `Retry-After` header |
-| `AuthError` (F10) | 401/403 | `unauthorized`/`forbidden` | generic (already non-oracle, F10 handler) |
-| `HTTPException 404` (F17 ownership) | 404 | `not_found` | "session not found" |
-| `ProviderError` (F3) | 503 | `provider_unavailable` | "upstream model unavailable" |
-| `asyncio.TimeoutError` (F11) | 504 / SSE `error` | `timeout` | "request exceeded 30s" |
+| `ProviderError` (F3) | 503 | `provider_unavailable` | "upstream provider unavailable" |
+| `asyncio.TimeoutError`/`TimeoutError` (F11) | 504 / SSE `error` | `timeout` | "request timed out" |
 | anything else | 500 | `internal_error` | generic — never a stack trace or DB detail (AC-13) |
+
+The envelope covers the **typed** error classes above. Two categories deliberately keep FastAPI's
+`{"detail": ...}` shape instead:
+
+- **`AuthError` (F10)** — its existing handler already renders a generic non-oracle body; wrapping it
+  would change nothing and risk the F10 tests. AC-13 explicitly carves it out ("unchanged from F10").
+- **Raw `HTTPException`s the routes raise** — `404 not found`, `409 session_busy` (F17), `403
+  flags_override requires admin` (F11). Starlette matches `HTTPException`'s own handler before the
+  catch-all `Exception`, so these return `{"detail": ...}`. F17's suite asserts
+  `{"detail": "session_busy"}`, so this shape is load-bearing and preserved.
 
 Pinecone failure is **not** in this table: F5 already downgrades it to a `degraded=true` answer inside
 the pipeline, so it never reaches a handler (AC-16). `/api/health` reports it independently (§ below).
@@ -258,12 +266,15 @@ AC-24 asserts `alembic revision --autogenerate` yields an empty diff after F11.
 
 ## 12. CI (`api:` job, mirrors `auth:`)
 
-Real Postgres + Redis services; run `tests/api`; async-guard over `app/api app/core` (ban
-`import requests`, sync `redis`, `create_engine(`, `.invoke(`) plus `ruff check`. Redis is real
-because the limiter's cross-worker guarantee (AC-10) and fail-open (AC-11) can't be faked; Postgres is
-real because health `SELECT 1`, `/api/history`, and `/api/documents` hit it. No OpenAI calls — the
-pipeline is stubbed in the contract/timeout/disconnect tests, so the job needs only placeholder keys
-(the `auth:` job's env block, reused).
+Real Postgres service; run `tests/api`; async-guard over `app/api` + the three new `app/core` files
+(ban `import requests`, sync `redis`, `create_engine(`) plus a scoped `ruff check` (F11-owned files
+only — `app/core/settings.py`/`contracts.py` carry pre-existing long-comment E501s that no job lints,
+and F11 does not adopt that debt); plus a no-migration guard (`python -m alembic revision
+--autogenerate` must emit no schema op, AC-24). Postgres is real because health `SELECT 1`,
+`/api/history` and `/api/documents` hit it. **Redis and the pipeline are faked** — the limiter is
+exercised against a shared `FakeRedis` (which proves AC-10's cross-worker property without a server)
+and `astream` is stubbed, so the job makes zero OpenAI/Pinecone/Redis network calls and needs only
+placeholder keys (the `auth:` env block, reused).
 
 ## 13. Metrics logged (every metric named is logged)
 

@@ -15,7 +15,7 @@ async def test_memory_off_ignores_session_id(client, authed, monkeypatch):
     monkeypatch.setattr(ask, "astream", make_fake_astream(rec))
 
     sid = await _create_session(client, authed)
-    r = await client.post("/api/ask", json={"question": "q", "session_id": str(sid)},
+    r = await client.post("/api/ask", json={"question": "qqq", "session_id": str(sid)},
                           headers=authed["headers"])
     assert r.status_code == 200
 
@@ -33,7 +33,7 @@ async def test_missing_session_id_is_stateless(client, authed, monkeypatch):
     rec = Recorder()
     monkeypatch.setattr(ask, "astream", make_fake_astream(rec))  # memory ON but no session_id
 
-    r = await client.post("/api/ask", json={"question": "q"}, headers=authed["headers"])
+    r = await client.post("/api/ask", json={"question": "qqq"}, headers=authed["headers"])
     assert r.status_code == 200
     events = parse_sse(r.text)
     assert not any(d and d.get("stage") == "summarizing_memory" for e, d in events if e == "stage")

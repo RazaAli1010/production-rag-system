@@ -141,3 +141,9 @@ class AnswerResponse(BaseModel):
     # failed (AC-14/AC-17). Additive, non-persisted contract field — default False keeps every
     # prior F3/F4 path and test unchanged; no Alembic migration (AnswerResponse is not a table).
     degraded: bool = False
+    # F11: request correlation id + server wall-clock, the two identity fields the canonical
+    # contract always reserved ("F13 owns request identity" held only because no consumer existed).
+    # The ask route stamps both from the request contextvar + a route timer — NOT threaded through
+    # baseline.py. Additive with defaults, same discipline as `degraded`/`tokens_in`; no migration.
+    request_id: str | None = None
+    latency_ms: int | None = None
