@@ -26,7 +26,7 @@ The mechanism:
 4. **Write-behind** — successful, non-refused, non-degraded answers are written to Redis + Postgres
    via `asyncio.create_task` AFTER the SSE stream has terminated. A cache write never adds latency.
 5. **Invalidation** — every entry carries `index_manifest_id`; a re-index makes stale entries fail
-   the manifest check lazily at lookup. `--flush` and per-`request_id` delete cover the rest.
+   the manifest check lazily at lookup. `--flush` and per-query delete cover the rest.
 
 ### 1.1 Design decisions resolved in the feature brief (do NOT re-derive)
 
@@ -37,8 +37,10 @@ The mechanism:
   `float32` matrix is 61 MB and a single matmul is sub-millisecond. Pinecone is the vector store;
   the cache embedding is compared in-process only. pgvector remains banned.
 - **Embedding is BYTEA**, `float32[1536]`, already migrated by F12.
-- **The lexical guard is not optional.** Cosine alone collides "BS admission deadline" with "MPhil
-  admission deadline" at ≥ 0.95. The Jaccard guard is what makes the threshold shippable.
+- **A second, non-embedding signal is not optional.** Cosine alone cannot separate paraphrases from
+  near-duplicates that differ by one identifier — measured at T7, the sets overlap. (The specced
+  form of that signal, a Jaccard floor, did not survive contact with the data; the shipped form is
+  a discriminative-token veto. See design §5.)
 - **Cache is an optimization, never a failure source.** Every Redis and Postgres cache error is
   caught and logged; the request proceeds as an uncached request.
 
@@ -67,7 +69,7 @@ keep answering, so a cache outage is a latency event, not an availability event.
 stop being served, so the cache cannot outlive the documents it quoted.
 
 **US-8 (Ops):** As an operator who found one bad cached answer, I want to delete that single entry by
-`request_id`, so poison control does not require flushing the whole cache.
+the question that produced it, so poison control does not require flushing the whole cache.
 
 **US-9 (Eval owner):** As the eval owner, I want the F4 harness's retrieval/RAGAS/refusal suites to
 be structurally incapable of measuring a cache hit, so hit@k and faithfulness stay comparable across
@@ -102,12 +104,21 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
   embedding by cosine similarity computed inline as a single numpy matmul over the L2-normalized
   matrix.
 - **AC-7 (Event-driven — semantic hit):** When the best-scoring entry's cosine is
-  `>= CACHE_SIMILARITY_THRESHOLD` (default `0.95`) **AND** the key-term Jaccard between the two
-  normalized queries is `>= CACHE_LEXICAL_JACCARD_MIN` (default `0.3`), the system shall return that
-  entry's `AnswerResponse` with `cache_hit=true`, increment `hits`, and set `last_hit_at`.
-- **AC-8 (Unwanted — lexical guard rejects):** If the cosine clears the threshold but the Jaccard
-  does not, the system shall treat the request as a MISS, and shall log `rag.cache_lexical_reject`
-  with both scores.
+  `>= CACHE_SIMILARITY_THRESHOLD` (calibrated `0.86`) **AND** the two normalized queries carry the
+  same discriminator set (`keys.discriminators`: `CACHE_DISCRIMINATIVE_TERMS` ∪ years ∪ section
+  ids), the system shall return that entry's `AnswerResponse` with `cache_hit=true`, increment
+  `hits`, and set `last_hit_at`.
+- **AC-8 (Unwanted — discriminator disagreement):** If the cosine clears the threshold but the two
+  queries disagree on any discriminator, the system shall treat the request as a MISS and log
+  `rag.cache_lexical_reject` with the cosine and both discriminator sets.
+
+  > **Amended after T7's calibration.** These ACs originally specified `cosine >= 0.95 AND
+  > key-term Jaccard >= 0.3`. Measured against real `text-embedding-3-small` vectors, both numbers
+  > were wrong: nothing reaches 0.95 (the tier would never fire), and the Jaccard floor is inert
+  > once the veto exists (optimal value 0.0 — adversarial pairs score *higher* Jaccard than real
+  > paraphrases). The two sets also overlap on cosine, so no threshold alone can separate them.
+  > `CACHE_LEXICAL_JACCARD_MIN` is deleted. Full table in design §5; evidence in
+  > `tests/cache/test_adversarial.py`.
 - **AC-9 (Unwanted — stale manifest):** If the best match's `index_manifest_id` differs from the
   current manifest id, the system shall treat the request as a miss and shall delete that entry from
   Postgres and from the in-memory matrix (lazy expiry, US-7).
@@ -139,6 +150,10 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
 - **AC-17 (Ubiquitous — upsert):** The system shall key the Postgres row on
   `query_hash = sha256(normalize(normalized_query))` with a unique constraint, and re-writing the
   same normalized query shall update the existing row rather than create a duplicate.
+- **AC-17b (Ubiquitous — cached token counts):** The system shall persist the `tokens_in` and
+  `tokens_out` the cached answer originally cost, so a later hit can report what it saved (AC-27).
+  These ride on `AnswerResponse` itself (AC-27b), so they are carried by the existing `answer` JSONB
+  with no extra column.
 - **AC-18 (Unwanted — capacity):** If the live entry count is `>= CACHE_MAX_ENTRIES` (default
   `10_000`), the system shall evict the least-recently-hit entry before inserting, so the brute-force
   matrix stays inside its justified size.
@@ -150,8 +165,16 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
 
 - **AC-20 (Ubiquitous — CLI flush):** `python -m app.caching.run --flush` shall delete every
   `cache_entries` row and every Redis cache key, print the deleted count, and exit `0`.
-- **AC-21 (Ubiquitous — poison control):** `python -m app.caching.run --delete-request-id <id>` shall
-  delete the single entry whose `request_id` matches and exit `0` (exit `1` when no row matched).
+- **AC-21 (Ubiquitous — poison control):** `python -m app.caching.run --delete-query "<question>"`
+  shall normalize the question to its `query_hash`, delete the single entry matching it from Postgres
+  and Redis, and exit `0` (exit `1` when no row matched).
+
+  > **Deviation from the brief (§4 "per-entry delete by request_id"), recorded deliberately.** No
+  > `request_id` is generated anywhere in the pipeline yet — F13 owns request logging — so a
+  > `request_id` column would be `NULL` on every row F9 writes and `--delete-request-id` would match
+  > nothing. Deleting by query text keys on the `query_hash` column F9 needs anyway (AC-17), needs no
+  > extra schema, and matches the operator's real workflow: they see a bad answer, and what they have
+  > in hand is the question. F13 may add `request_id` when it has one to write.
 - **AC-22 (Ubiquitous — lazy matrix load):** The system shall rebuild the in-memory matrix from
   Postgres on first cache use in the process, guarded by an `asyncio.Lock` so concurrent first
   requests rebuild it once, and shall re-derive it from Postgres after every process restart (no
@@ -177,6 +200,21 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
 - **AC-27 (Ubiquitous — central cost helper):** Dollars saved shall be computed with F2's central
   `estimate_cost(model, tokens_in, tokens_out)` over the cached response's `tokens_in`/`tokens_out` —
   the tokens the hit avoided spending — with no second rate table anywhere in `app/caching/`.
+- **AC-27b (Ubiquitous — restore the AnswerResponse token fields):** `AnswerResponse` shall carry
+  `tokens_in: int = 0` and `tokens_out: int = 0`, populated at every construction site in
+  `_pipeline_events`.
+
+  > **Why this is F9's job.** The Shared Context canonical contract specifies `tokens_in`/`tokens_out`
+  > on `AnswerResponse`; the implemented model omits them — pre-existing F3 drift.
+  > `_pipeline_events` already computes both as locals and discards them. F9 is the first feature that
+  > needs them (a hit must report the tokens it avoided), so F9 restores them. The change is additive
+  > with defaults: no existing test breaks, and `AnswerResponse` is not a table, so no migration. The
+  > payoff is that `$ saved` becomes computable AND rides out on the SSE `meta` event, which is what
+  > lets the F4 latency suite emit `cache_cost_saved_mean` with no extra plumbing (AC-33b).
+  >
+  > `request_id` and `latency_ms` — also in the canonical contract, also missing — are deliberately
+  > NOT added here: F9 has no use for them and F13 owns request logging. Restoring a contract field
+  > with no consumer is speculative.
 - **AC-28 (Ubiquitous — request log fields):** `RequestLog.cache_hit` and `RequestLog.embed_ms`
   (already migrated by F12) shall be populated from this path; no metric named in this spec is
   emitted without a log site.
@@ -185,9 +223,17 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
 
 - **AC-29 (Ubiquitous — async surface):** All cache I/O shall be async: `redis.asyncio` (the sync
   client is banned), async SQLAlchemy for `cache_entries`, `aembed_query` for the embedding. The
-  cosine matmul, sha256 hashing and Jaccard computation are cheap pure-CPU and shall run inline. The
-  `app/rag/` sync-twin grep guard (CI + `tests/rag/test_generation.py`) shall be extended to glob
-  `app/caching/*.py`.
+  cosine matmul, sha256 hashing and Jaccard computation are cheap pure-CPU and shall run inline.
+- **AC-29b (Ubiquitous — CI guard):** `.github/workflows/ci.yml` shall gain a `caching:` job carrying
+  its own async-guard block over `app/caching` (banning `.embed_query(`/`.embed_documents(`,
+  `import requests`, bare `import redis` / `from redis import …`, `.invoke(`, `create_engine(`) plus
+  `ruff check app/caching`, and `backend/tests/cache/test_no_sync_calls.py` shall enforce the same in
+  the suite.
+
+  > CI gives each package its own guard block (`app/db`, `app/ingestion`, `app/indexing`, `app/rag`,
+  > `app/evals`) rather than one shared glob, so a new package needs a new job — there is no glob to
+  > widen. Without this, `app/caching` would be the one module talking to Redis and *not* covered by
+  > the async mandate.
 - **AC-30 (State-driven — prod/request toggle):** While `ENABLE_CACHE` is `false` (the default),
   `_pipeline_events` shall skip lookup and write entirely and behave byte-for-byte as
   `f8-compression-after`, emitting no `cache_lookup` stage.
@@ -200,12 +246,20 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
 - **AC-33 (Event-driven — eval cache measurement):** When the run is `--suite latency` alone,
   `parse_flags` shall honour an explicit `cache=on`, and `run_latency` shall post
   `skip_cache = not flags.cache` rather than a hardcoded `True`.
+- **AC-33b (Ubiquitous — cache eval metrics):** The latency suite shall emit `cache_hit_rate`,
+  `cache_cost_saved_mean`, and `latency_cache_hit_p50`/`_p95` (percentiles over hit requests only),
+  read off the SSE `meta` event. It shall NOT alter `cost_mean` or `tokens_mean`: both are recorded
+  at `f8-compression-after` on a fixed basis (`cost_mean` is output-only; `tokens_mean` counts
+  `token` events), and changing either would make the gate's delta table compare two different
+  measurements. These names are chosen so `compare.py`'s prefix-driven direction arrows are correct
+  without a `compare.py` change (design §9).
 - **AC-34 (Ubiquitous — Settings centralisation):** Every new config value (`ENABLE_CACHE`,
   `REDIS_URL`, `CACHE_*`) shall live in the single `app.core.settings.Settings` class with no module
   reading `os.environ` directly.
-- **AC-35 (Ubiquitous — migration):** The two new `cache_entries` columns (`query_hash` unique,
-  `request_id` nullable) shall be added by Alembic revision `0003`, with a symmetric `downgrade()`
-  and an autogenerate-clean diff afterwards.
+- **AC-35 (Ubiquitous — migration):** The single new `cache_entries` column (`query_hash`, NOT NULL,
+  unique) shall be added by Alembic revision `0003`, with a symmetric `downgrade()` and an
+  autogenerate-clean diff afterwards. F12's `0001_initial.py` already created the rest of the table;
+  `embedding` stays `LargeBinary` (no pgvector). No other schema change is in F9's scope.
 - **AC-36 (Ubiquitous — eval gate):** F9 shall not be done until
   `docs/eval_results/f9-cache-after.md` and
   `docs/eval_results/f9-cache-after-vs-f8-compression-after.md` are committed, mapping the label to a
@@ -215,6 +269,22 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
 
 1. A paraphrase of a cached question hits in **< 300ms end-to-end** (`latency_cache_hit_p95`), and an
    exact repeat hits without any embed call.
+
+   > **Measured at T15 — this target is configuration-dependent and NOT met in every config.** The
+   > cache key is F7's normalized question, so the rewrite must run *before* the lookup (CLAUDE.md's
+   > pipeline order). Live numbers, Postgres-only tier:
+   >
+   > | config | `cache_lookup` stage | end-to-end hit |
+   > |---|---|---|
+   > | rewrite ON | **7,625ms** (gpt-4o-mini rewrite alone = 5,065ms) | 3,781ms |
+   > | rewrite OFF (F7's shipped default) | **1,703ms** (embed-bound, cold client) | — |
+   > | rewrite OFF + Redis exact hit | *not measured — no Redis on the dev box* | — |
+   >
+   > Only the Redis exact-match tier can plausibly clear 300ms: it is the one path that skips both
+   > the rewrite and the embed. With rewrite ON the target is **unachievable by construction** — a
+   > 5s LLM call precedes every lookup. The AC stands as written for the Redis exact path; the
+   > semantic path's honest number is embed-bound. Verified speed-up end-to-end: **18×**
+   > (69,188ms → 3,781ms), byte-identical replay.
 2. The committed adversarial pair set ("BS admission deadline" vs "MPhil admission deadline", and
    siblings) does **NOT** collide at the shipped `CACHE_SIMILARITY_THRESHOLD` /
    `CACHE_LEXICAL_JACCARD_MIN` — test committed under `backend/tests/cache/`.
@@ -223,13 +293,13 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
    endpoint without an F9 change).
 4. Redis down → answers still served, `rag.cache_degraded` logged, no 5xx.
 5. Re-index (new `index_manifest_id`) → stale entries are not served and are deleted on lookup.
-6. `--flush` and `--delete-request-id` both work against a live Postgres + Redis.
+6. `--flush` and `--delete-query` both work against a live Postgres + Redis.
 7. `ENABLE_CACHE=false` is byte-for-byte `f8-compression-after` — proved by a toggle-parity test.
 8. Retrieval/RAGAS/refusal eval runs show **0% cache interference** (`parse_flags` forces
    `cache=False`); a latency-only run can turn it on.
 9. Alembic `0003` applies and downgrades cleanly; `alembic revision --autogenerate` produces an
    empty diff afterwards.
-10. The `app/caching/*.py` sync-twin grep guard passes in CI.
+10. The `caching:` CI job's async guard passes over `app/caching`.
 11. **Eval gate:** `f9-cache-after` vs `f8-compression-after` delta report committed (see tasks T13).
 
 ## 5. Out of scope (do not implement here)
@@ -239,6 +309,10 @@ path, so the F9 gate can prove the latency/cost win it exists to prove.
 - **The stats endpoint** — F13 owns it. F9 only guarantees every number it needs is logged.
 - **`request_logs` row writing** — F13 owns the writer. F9 populates the existing `cache_hit` /
   `embed_ms` fields through its log records.
+- **`AnswerResponse.request_id` / `.latency_ms`** — both are in the canonical Shared Context contract
+  and both are missing from the implementation, but F9 has no consumer for either and F13 owns
+  request identity. F9 restores only the two fields it actually uses (AC-27b).
+- **A `request_id` column on `cache_entries`** — see AC-21. Nothing can populate it until F13.
 - **pgvector / any DB-side vector index** — fixed stack decision; brute-force matmul under 10k rows.
 - **Redis rate limiting** — F11.
 - **Caching refusals, degraded answers, or per-user/per-session cache partitioning** — the cache is

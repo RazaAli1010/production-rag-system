@@ -9,7 +9,7 @@ surgery on the retrieval seam, then the splice into `_pipeline_events`, then the
 calibration, then the gate. Nothing touches `baseline.py` until both tiers pass their own tests —
 the pipeline is the last thing to change, not the first.
 
-**T14 IS the feature.** Per CLAUDE.md, F9 is not done when the code works; it is done when
+**T16 IS the feature.** Per CLAUDE.md, F9 is not done when the code works; it is done when
 `docs/eval_results/f9-cache-after-vs-f8-compression-after.md` is committed.
 
 ---
@@ -31,14 +31,16 @@ since F6 — pin exactly, matching the file's convention). Create `backend/tests
 
 ---
 
-### T2 — Alembic `0003`: `query_hash` + `request_id`
-Add `query_hash: Mapped[str]` (unique) and `request_id: Mapped[str | None]` to `CacheEntry` in
-`app/db/models/ops.py`, then write `0003_f9_cache_entry_keys.py` per design §8 — explicit constraint
-names (`uq_cache_entries_query_hash`, `ix_cache_entries_request_id`), a docstring stating what
-`0001_initial.py` already created so nothing is recreated, and a symmetric `downgrade()`.
+### T2 — Alembic `0003`: `query_hash`
+Add `query_hash: Mapped[str]` (unique) to `CacheEntry` in `app/db/models/ops.py`, then write
+`0003_f9_cache_entry_query_hash.py` per design §8 — explicit constraint name
+`uq_cache_entries_query_hash` (matching `base.py`'s naming convention so autogenerate stays clean), a
+docstring stating what `0001_initial.py` already created so nothing is recreated, the
+`server_default=""` → `alter_column(server_default=None)` dance for the NOT NULL add, and a symmetric
+`downgrade()`. **One column only** — no `request_id` (design §8).
 
-**Test:** extend `tests/db/test_models_ops.py` for the new columns; a `tests/cache/test_migration_0003.py`
-in the style of `tests/ingestion/test_migration_0002.py` asserting upgrade → columns+constraint exist,
+**Test:** extend `tests/db/test_models_ops.py` for the new column; a `tests/cache/test_migration_0003.py`
+in the style of `tests/ingestion/test_migration_0002.py` asserting upgrade → column+constraint exist,
 downgrade → gone, and `alembic revision --autogenerate` yields an empty diff after upgrade (AC-35).
 
 ---
@@ -70,9 +72,14 @@ deletes only prefixed keys.
 ---
 
 ### T5 — `SemanticCache`: matrix load + cosine lookup
+First add `manifest_id(settings)` to `app/indexing/manifest.py` (design §4) — `sha256` of the manifest
+JSON, `"none"` when absent, reusing `read_manifest` verbatim. `Manifest` has no id field, so this is
+what `cache_entries.index_manifest_id` compares against.
+
 `app/caching/store.py`: the class, `_ensure_loaded` (async DB read of every row → L2-normalized
-`float32` matrix + row-parallel `_ids`/`_query_texts`/`_terms`/`_manifests`, under `asyncio.Lock`,
-once per process — AC-22), and `lookup` doing the inline matmul and returning
+`float32` matrix + row-parallel `_ids`/`_query_texts`/`_terms`/`_manifests` + the current
+`manifest_id`, under `asyncio.Lock`, once per process — AC-22), and `lookup` doing the inline matmul
+and returning
 `(AnswerResponse, cosine)` or `None`. Wire the full accept rule: cosine threshold → lexical Jaccard
 (`rag.cache_lexical_reject` on rejection, AC-8) → manifest check (miss + delete stale, AC-9). Wrap
 the whole body in `except Exception` → `rag.cache_degraded` → `None` (AC-10). Empty matrix → `None`
@@ -89,7 +96,8 @@ concurrent `asyncio.gather` of two first-lookups loads the matrix exactly once.
 ### T6 — `SemanticCache`: write, evict, flush, delete
 `write` (upsert `ON CONFLICT (query_hash) DO UPDATE`, AC-17; append to the in-memory matrix under the
 lock), eviction of the least-recently-hit row when `len(_ids) >= CACHE_MAX_ENTRIES` (AC-18), `flush`
-(Postgres delete-all + `redis_hot.flush` + matrix clear), `delete_by_request_id` (AC-21), plus the
+(Postgres delete-all + `redis_hot.flush` + matrix clear), `delete_by_query` (normalize → `query_hash`
+→ delete, AC-21), plus the
 `hits += 1` / `last_hit_at = now()` update on a hit. Then the module-level seam: `lookup(...)` and
 `schedule_write(...)` — `asyncio.create_task` with the strong-reference set and a
 `task.add_done_callback(_tasks.discard)` (AC-14), the task body wrapped in `except Exception` →
@@ -99,7 +107,7 @@ lock), eviction of the least-recently-hit row when `len(_ids) >= CACHE_MAX_ENTRI
 writing the same normalized query twice leaves exactly one row with the second answer; at
 `CACHE_MAX_ENTRIES=2` a third write evicts the least-recently-hit and the matrix has 2 rows; a hit
 increments `hits` and sets `last_hit_at`; `flush` returns the count and empties both tiers;
-`delete_by_request_id` returns 1 then 0; a `schedule_write` whose write raises logs
+`delete_by_query` returns 1 then 0; a `schedule_write` whose write raises logs
 `cache_write_failed` and does not leave an unretrieved-exception warning.
 
 ---
@@ -151,21 +159,28 @@ themselves. Add `"ENABLE_CACHE": flags.cache` to `rag/flags.apply_flags` (AC-31)
 
 ---
 
-### T10 — `observability.log_cache` + the pipeline splice
+### T10 — `AnswerResponse` tokens + `observability.log_cache` + the pipeline splice
+Add `tokens_in: int = 0` / `tokens_out: int = 0` to `AnswerResponse` (`app/core/contracts.py:117`,
+AC-27b) and populate them at BOTH `baseline.py` construction sites — the refusal branch (line 149)
+gets `would_be_tokens_in`/`0`, the normal branch (line 216) gets the locals it already computes and
+currently discards.
+
 Add `log_cache(...)` to `app/rag/observability.py` per design §4 — a structlog emit mirroring
 `log_rerank`/`log_rewrite`/`log_compression`, with `est_cost_saved_usd` computed by the caller via
 F2's central `estimate_cost` over the cached response's `tokens_in`/`tokens_out` (AC-26/27). Then
 splice the seam into `_pipeline_events` per design §3, entirely under `if settings.ENABLE_CACHE`:
 `cache_lookup started` → rewrite-once → Redis exact → embed → semantic → hit-replay or fall through
-with `rr`/`query_vec`. Extend the CI sync-twin grep (`.github/workflows/ci.yml:261`) and the in-suite
-guard (`tests/rag/test_generation.py:52-64`) to glob `app/caching/*.py` (AC-29).
+with `rr`/`query_vec`. The hit replay reuses the refusal path's existing terminal shape
+(`baseline.py:147-162`) — do not invent a second one.
+
+(The CI async guard for `app/caching` is its own task, T13 — CI has no shared glob to widen.)
 
 **Test:** extend `tests/rag/test_streaming.py` — `ENABLE_CACHE=False` emits no `cache_lookup` stage
 and the event sequence is identical to today (the toggle-parity test, AC-30); with the cache on and a
 seeded hit the order is exactly `cache_lookup started/done` → three `skipped` stages → one `token` →
 `citations` → `meta(cache_hit=True)` → `done` (AC-24), the retriever and LLM are never called, and
-`astream`/`answer` agree on the reassembled text byte-for-byte including the disclaimer (AC-25); the
-grep guard test passes over `app/caching/`.
+`astream`/`answer` agree on the reassembled text byte-for-byte including the disclaimer (AC-25).
+Assert `tokens_in`/`tokens_out` are non-zero on a normal answer (they were silently dropped before).
 
 ---
 
@@ -182,37 +197,77 @@ answer, and a cache-hit answer each schedule zero writes; a write that sleeps 20
 ---
 
 ### T12 — `app/caching/run.py` CLI
-`python -m app.caching.run --flush` and `--delete-request-id <id>`, in `app/evals/run.py`'s style:
+`python -m app.caching.run --flush` and `--delete-query "<question>"`, in `app/evals/run.py`'s style:
 `argparse`, injectable `settings`/`sessionmaker` for tests, `async def main(argv=None, ...) -> int`,
 and `_entrypoint()` = `raise SystemExit(asyncio.run(main()))`. `--flush` prints the deleted count and
-exits 0 (AC-20); `--delete-request-id` exits 0 on a match, 1 on none (AC-21); neither flag → usage,
+exits 0 (AC-20); `--delete-query` exits 0 on a match, 1 on none (AC-21); neither flag → usage,
 exit 2.
 
 **Test:** `tests/cache/test_run.py` — `main(["--flush"], settings=..., sessionmaker=...)` returns 0
-and empties both tiers; `--delete-request-id` returns 0 then 1; no args returns 2. Redis being down
+and empties both tiers; `--delete-query` returns 0 then 1; no args returns 2. Redis being down
 must not make `--flush` fail its Postgres half.
 
 ---
 
-### T13 — Eval harness: let latency (and only latency) see the cache
+### T13 — CI `caching:` job + in-suite async guard (AC-29b)
+Add a `caching:` job to `.github/workflows/ci.yml` mirroring the `rag:` job (lines 203-277): Postgres
+service, `alembic upgrade head`, `pytest tests/cache -v`, then an async-guard block over `app/caching`
+copying the `rag:` guard's patterns verbatim, plus `ruff check app/caching`. Add
+`tests/cache/test_no_sync_calls.py` mirroring the existing `tests/evals/test_no_sync_calls.py`,
+globbing `app/caching/*.py`.
+
+CI has **no shared glob to widen** — each package gets its own job and guard block (`app/db` line 55,
+`app/ingestion` 116, `app/indexing` 184, `app/rag` 256, `app/evals` 331). Without this job,
+`app/caching` would be the one module talking to Redis and not covered by the async mandate.
+
+**Test:** the guard passes locally over `app/caching`; deliberately adding `import redis` to a module
+there fails it (verify once, then revert).
+
+---
+
+### T14 — Eval harness: let latency (and only latency) see the cache
 `parse_flags(spec, *, allow_cache=False)` per design §9 — force `cache=False` unless `allow_cache`
 (AC-32). `run.py` passes `allow_cache=(expand_suites(args.suite) == ["latency"])` (AC-33).
-`latency.py:121`'s hardcoded `"skip_cache": True` → `not flags.cache`. Emit the new metrics from
-`run_latency` under the exact names design §9 fixes: `cache_hit_rate`, `cache_cost_saved_mean`,
-`latency_cache_hit_p50` / `_p95` (harvested from `meta.cache_hit`). `compare.py` needs **no** change —
-the names carry the direction.
+`latency.py:121`'s hardcoded `"skip_cache": True` → `not flags.cache`. `_time_one_inprocess`
+(`latency.py:38`) currently reads only `stage`/`token`/`error` events — add an `elif ev.event ==
+"meta"` branch to capture `cache_hit`/`tokens_in`/`tokens_out` and return `cache_hit`. Emit the new
+metrics from `run_latency` under the exact names design §9 fixes: `cache_hit_rate`,
+`cache_cost_saved_mean`, `latency_cache_hit_p50` / `_p95` (percentiles over hit requests only).
+
+**Leave `cost_mean` and `tokens_mean` exactly as they are** (design §9) — both are recorded at
+`f8-compression-after` on a fixed basis, and changing either makes the gate compare two different
+measurements. `compare.py` needs **no** change — the names carry the direction.
 
 **Test:** extend `tests/evals/test_flags.py` — `parse_flags("cache=on")` → `cache is False`;
 `parse_flags("cache=on", allow_cache=True)` → `True`; `--suite all --flags cache=on` forces False
 end-to-end through `run.main`; `--suite latency --flags cache=on` does not. Extend
 `tests/evals/test_latency.py` — an injected `astream` yielding `cache_hit=True` produces
-`cache_hit_rate` and `latency_cache_hit_p95`; `test_compare.py` asserts `cache_hit_rate` renders ▲ on
-an increase and `latency_cache_hit_p95` renders ▲ on a decrease.
+`cache_hit_rate` and `latency_cache_hit_p95`, and `cost_mean` is still output-only;
+`test_compare.py` asserts `cache_hit_rate` renders ▲ on an increase and `latency_cache_hit_p95`
+renders ▲ on a decrease.
 
 ---
 
-### T14 — Acceptance / definition of done
+### T15 — Acceptance / definition of done
 Run the full acceptance set against a live Postgres + Redis (`make db-up && make migrate`).
+
+> **RESEED THE CORPUS FIRST, and do not run pytest afterwards.** `tests/rag/conftest.py` truncates
+> `chunks`/`documents` in the SAME database dev and eval runs use, and `citations.parse_citations`
+> resolves `[n]` markers by joining those tables. Empty → every citation is dropped → every answer
+> is `refused=True (no_grounded_claims)` despite the LLM emitting a correct `[1]`-cited answer →
+> and **AC-16 never caches a refusal**, so the cache can never write or hit.
+>
+> Measured 2026-07-17 over 6 dataset questions, identical config: **0/6 cacheable** with the tables
+> empty, **6/6 cacheable** after reseeding. This is also what `false_refusal_rate = 1.0000` in
+> `docs/eval_results/f8-compression-after-vs-f7-rewrite-after.md` is recording — a corpus-less DB,
+> not a model or prompt failure.
+>
+> ```bash
+> python -m app.ingestion.run --all                             # re-registers docs (no re-download)
+> python -m app.indexing.run --strategy fixed --namespace all   # rewrites chunks (~$0.0003)
+> ```
+> Ingestion must precede indexing: `indexing.source.indexed_targets` reads its targets from the
+> `documents` table, so indexing alone reports "indexed 0 docs".
 
 **Definition of done:** every criterion in requirements §4 is green —
 1. paraphrase hit `< 300ms` end-to-end; exact repeat hits with zero embed calls;
@@ -220,30 +275,47 @@ Run the full acceptance set against a live Postgres + Redis (`make db-up && make
 3. hit rate / tokens saved / $ saved logged on every lookup;
 4. Redis down → still answering, `rag.cache_degraded`, no 5xx;
 5. stale manifest → not served, entry deleted;
-6. `--flush` and `--delete-request-id` work live;
+6. `--flush` and `--delete-query` work live;
 7. `ENABLE_CACHE=false` is byte-for-byte `f8-compression-after` (toggle-parity test);
 8. retrieval/RAGAS/refusal runs force `cache=False`;
 9. `0003` upgrades + downgrades clean, autogenerate diff empty;
-10. the `app/caching/*.py` grep guard passes in CI.
+10. the `caching:` CI job's async guard passes over `app/caching`.
 
 ---
 
-### T15 — EVAL GATE (mandatory Phase-C closer)
+### T16 — EVAL GATE (mandatory Phase-C closer)
 Run the F4 harness against the cache path and commit the delta reports. Per CLAUDE.md, F9's gate is
 **latency/cost suites only** — the cache is post-retrieval by construction (a hit skips retrieval
 entirely; a miss retrieves identically), so hit@k / MRR / RAGAS are not re-measured and
 `f8-compression-after`'s retrieval numbers stand.
 
-```bash
-# Same dense index + bm25.pkl as f8-compression-after (same SHA/manifest); F9 adds no re-index and
-# no re-embed of the corpus — the cache stores answers, not chunks (design §10).
-#
-# The workload is repeat-heavy by construction: run_latency samples answerable[i % len(answerable)],
-# so with EVAL_LATENCY_REQUESTS > len(answerable) the first pass populates the cache and every later
-# pass is an exact repeat (design §9). Flush first so the run starts cold and the hit rate is a known
-# function of N, not of whatever was cached yesterday.
-python -m app.caching.run --flush
+Same dense index + `bm25.pkl` as `f8-compression-after` (same SHA/manifest); F9 adds no re-index and
+no corpus re-embed — the cache stores answers, not chunks (design §10).
 
+**Two things must be true of the workload, and neither is automatic** (design §9):
+
+1. **It must actually repeat.** At f8's `EVAL_LATENCY_REQUESTS=30` over the dataset's 63 answerable
+   records, `answerable[i % 63]` yields 30 *distinct* questions — 0% hit rate. Hence
+   `EVAL_LATENCY_UNIQUE_QUESTIONS=15`: 30 requests / 15 unique = a declared 50% repeat rate.
+2. **Both labels must run identically.** Same N, same cap, or the delta compares two workloads
+   instead of two pipelines.
+
+`f8-compression-after` must be **re-run** to seed `eval_runs` (`--compare` reads the previous label's
+row from Postgres; a fresh DB has none) *and* to match the new workload shape.
+
+```bash
+export EVAL_LATENCY_REQUESTS=30
+export EVAL_LATENCY_UNIQUE_QUESTIONS=15   # 50% repeats at f8's proven, rate-limit-safe N
+
+# 1. Re-seed the baseline: identical config, cache OFF (≡ the f8-compression-after path).
+python -m app.caching.run --flush
+python -m app.evals.run --suite latency \
+    --flags hybrid=on,rerank=on,query_rewrite=on,compression=on,cache=off,memory=off \
+    --label f8-compression-after --yes
+
+# 2. The F9 run: identical config, cache ON. Flush first so the run starts cold and the hit rate is
+#    a function of the workload, not of whatever was cached yesterday.
+python -m app.caching.run --flush
 python -m app.evals.run --suite latency \
     --flags hybrid=on,rerank=on,query_rewrite=on,compression=on,cache=on,memory=off \
     --label f9-cache-after --yes
@@ -251,10 +323,8 @@ python -m app.evals.run --suite latency \
 python -m app.evals.run --label f9-cache-after --compare f8-compression-after
 ```
 
-**Match N to the f8 baseline.** `f8-compression-after`'s latency suite was trimmed to 30 requests; the
-`f8` row in the delta must come from a run at the same `EVAL_LATENCY_REQUESTS`, or the comparison is
-between two different workloads. If the committed `f8-compression-after` label used a different N,
-re-run it at the F9 N with `cache=off` before comparing, and say so in Provenance.
+`--suite latency` alone is what permits `cache=on` at all (`parse_flags(allow_cache=...)`, T14) —
+`--suite all` would silently force it off and the run would measure nothing.
 
 Then commit `docs/eval_results/f9-cache-after.md` and
 `docs/eval_results/f9-cache-after-vs-f8-compression-after.md`.
@@ -263,16 +333,21 @@ Then commit `docs/eval_results/f9-cache-after.md` and
 `f9-cache-after` → its git SHA + index manifest. Per the `docs/eval_results/` Notes convention
 (headline vs target → distribution/mechanism → each regression named with its tradeoff → explicit
 **Verdict** → **Provenance**), the report shows:
-- **`cache_hit_rate` reported** against the workload's structural expectation
-  (`1 - len(answerable)/N`) — a materially lower rate means entries are not being written or the
-  accept rule is too tight, and must be explained, not averaged away;
+- **`cache_hit_rate` ≈ 0.50**, the workload's declared repeat rate
+  (`1 - EVAL_LATENCY_UNIQUE_QUESTIONS/EVAL_LATENCY_REQUESTS`). Materially lower means entries are not
+  being written or the accept rule is rejecting exact repeats — explain it, do not average it away;
 - **`latency_cache_hit_p95` < 300ms** — the feature's headline acceptance criterion;
 - **`latency_p50` / `latency_p95` down** vs `f8-compression-after`, with the miss-path p95 noted
   separately (it must be **flat or slightly better** — design §2's vector reuse removes 2 redundant
   namespace embeds; a miss-path *regression* means the vector threading is broken, and is a gate
   failure regardless of how good the hit numbers look);
-- **`cache_cost_saved_mean` > 0** and cost/query down;
-- **`tokens_mean` noted** (hits replay cached `tokens_out`, so this measures the cache, not the LLM);
+- **`cache_cost_saved_mean` > 0** — the real saving, computed from the cached response's
+  `tokens_in`/`tokens_out` (AC-27b) via the central `estimate_cost`;
+- **`tokens_mean` and `cost_mean` explicitly flagged as uninterpretable on a cache-on run** — a hit
+  emits ONE `token` event carrying the whole answer, so `tokens_mean` collapses toward 1 and
+  `cost_mean` (which is derived from it, output-only) collapses with it. Both will look like a
+  spectacular win in the delta table and **neither is one**: they are stream artifacts. Say so in the
+  Notes rather than letting a reader bank them;
 - **retrieval hit@k / MRR / RAGAS not re-run** — stated explicitly, with the reason above.
 
 **Ship default-off unless the numbers earn otherwise.** `ENABLE_CACHE` defaults to `false` and stays

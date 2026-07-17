@@ -36,22 +36,27 @@ def _percentiles(samples: list[float]) -> dict[str, float]:
 
 
 async def _time_one_inprocess(question, flags, settings, sessionmaker, astream):
-    """One request: total ms, per-stage ms (from StageEvent), output token count."""
+    """One request: total ms, per-stage ms (from StageEvent), output token count, and the terminal
+    `meta` payload (F9 reads `cache_hit`/`tokens_in`/`tokens_out` off it)."""
     stage_ms: dict[str, float] = {}
     tokens_out = 0
+    meta: dict = {}
     t0 = time.monotonic()
     async with sessionmaker() as session:
         async for ev in astream(question, settings.EVAL_RETRIEVAL_K, None, flags,
-                                 session=session, settings=settings):
+                                 session=session, settings=settings,
+                                 sessionmaker=sessionmaker):
             if (ev.event == "stage" and ev.data.get("status") == "done"
                     and ev.data.get("ms") is not None):
                 stage_ms[ev.data["stage"]] = float(ev.data["ms"])
             elif ev.event == "token":
                 tokens_out += 1
+            elif ev.event == "meta":
+                meta = ev.data
             elif ev.event == "error":
                 break
     total_ms = (time.monotonic() - t0) * 1000
-    return total_ms, stage_ms, tokens_out
+    return total_ms, stage_ms, tokens_out, meta
 
 
 async def run_latency(
@@ -68,19 +73,26 @@ async def run_latency(
         return SuiteResult(suite="latency", metrics=[])
 
     n = settings.EVAL_LATENCY_REQUESTS
+    # F9: cap the distinct pool first, so the repeat rate is a DECLARED parameter rather than an
+    # accident of (n mod len(answerable)). None => every record, i.e. the pre-F9 behaviour.
+    pool = answerable
+    if settings.EVAL_LATENCY_UNIQUE_QUESTIONS is not None:
+        pool = answerable[: settings.EVAL_LATENCY_UNIQUE_QUESTIONS]
     # Sample with replacement so N is honored regardless of dataset size.
-    questions = [answerable[i % len(answerable)].question for i in range(n)]
+    questions = [pool[i % len(pool)].question for i in range(n)]
 
     if settings.EVAL_LATENCY_ENDPOINT:
-        totals, stage_series, token_counts = await _run_endpoint(questions, settings)
+        totals, stage_series, token_counts = await _run_endpoint(questions, flags, settings)
+        metas = []  # the HTTP path does not parse `meta` yet — F11 owns that endpoint
     else:
-        totals, stage_series, token_counts = [], {}, []
+        totals, stage_series, token_counts, metas = [], {}, [], []
         for q in questions:
-            total_ms, stage_ms, tok = await _time_one_inprocess(
+            total_ms, stage_ms, tok, meta = await _time_one_inprocess(
                 q, flags, settings, sessionmaker, astream
             )
             totals.append(total_ms)
             token_counts.append(tok)
+            metas.append(meta)
             for stage, ms in stage_ms.items():
                 stage_series.setdefault(stage, []).append(ms)
 
@@ -93,16 +105,55 @@ async def run_latency(
 
     tokens_mean = sum(token_counts) / len(token_counts) if token_counts else 0.0
     # output-only cost (see module docstring — prompt tokens aren't exposed on the SSE stream).
+    #
+    # F9 NOTE: `tokens_in` IS on `meta` now, so "fixing" this into a full per-request cost is
+    # tempting — DON'T. `cost_mean` and `tokens_mean` are already recorded at f8-compression-after
+    # on this basis; changing it would make the gate's delta row a comparison of two different
+    # measurements rather than of two pipelines. `cache_cost_saved_mean` below is added as a NEW
+    # metric precisely so these two can stay frozen.
     cost_mean = estimate_cost(settings.LLM_MODEL, 0, int(tokens_mean))
     metrics.append(MetricValue(metric="tokens_mean", value=tokens_mean))
     metrics.append(MetricValue(metric="cost_mean", value=cost_mean))
+    metrics.extend(_cache_metrics(totals, metas, settings))
 
     logger.info("evals.latency.summary", requests=n,
                 latency_p95=_percentiles(totals)["p95"], tokens_mean=tokens_mean)
     return SuiteResult(suite="latency", metrics=metrics)
 
 
-async def _run_endpoint(questions, settings):
+def _cache_metrics(totals, metas, settings) -> list[MetricValue]:
+    """F9's gate metrics (AC-33b). Emitted only when the run actually saw the cache, so every
+    earlier label's report is byte-for-byte unchanged.
+
+    The names are load-bearing: `compare.py` derives its direction arrows from metric-name prefixes
+    (`_LOWER_IS_BETTER_PREFIXES = ("latency_", "cost_", ...)`), so `cache_cost_saved_mean` must NOT
+    be named `cost_saved_mean` (which would render an improvement as ▼) and `latency_cache_hit_p95`
+    must NOT be named `cache_hit_latency_p95` (which would render a speed-up as ▼). Named this way,
+    `compare.py` needs no change at all.
+    """
+    if not metas:
+        return []
+    hits = [m for m in metas if m.get("cache_hit")]
+    if not hits and not any("cache_hit" in m for m in metas):
+        return []  # pre-F9 shape (no meta captured) — emit nothing
+
+    out = [MetricValue(metric="cache_hit_rate", value=len(hits) / len(metas))]
+
+    hit_latencies = [t for t, m in zip(totals, metas) if m.get("cache_hit")]
+    if hit_latencies:
+        for name, val in _percentiles(hit_latencies).items():
+            out.append(MetricValue(metric=f"latency_cache_hit_{name}", value=val))
+
+    # The real saving: what the generation a hit skipped WOULD have cost. Uses the cached
+    # response's own token counts (AC-27b) through F2's central estimate_cost (AC-27) — a miss
+    # saves nothing, so it contributes 0 to the mean.
+    saved = [estimate_cost(settings.LLM_MODEL, m.get("tokens_in", 0), m.get("tokens_out", 0))
+             if m.get("cache_hit") else 0.0 for m in metas]
+    out.append(MetricValue(metric="cache_cost_saved_mean", value=sum(saved) / len(saved)))
+    return out
+
+
+async def _run_endpoint(questions, flags, settings):
     """F11 mode: drive the real `/api/ask` SSE endpoint. Dormant unless the endpoint is set."""
     import httpx
 
@@ -118,7 +169,10 @@ async def _run_endpoint(questions, settings):
             # streaming surface while avoiding the sync-stream token the async grep-guard bans.
             request = client.build_request(
                 "POST", settings.EVAL_LATENCY_ENDPOINT,
-                json={"question": q, "skip_cache": True},
+                # F9/AC-33: was hardcoded True. The harness still bypasses the cache for every
+                # suite but a latency-only run (enforced in `parse_flags`), so honouring the flag
+                # here is what lets the F9 gate measure the cache path over HTTP once F11 lands.
+                json={"question": q, "skip_cache": not flags.cache},
             )
             resp = await client.send(request, stream=True)
             try:

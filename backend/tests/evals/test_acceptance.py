@@ -18,7 +18,7 @@ from tests.evals.conftest import FIXTURES_DIR, make_settings
 
 
 def _install_fakes(monkeypatch, spy):
-    async def fake_retrieve(q, k, ns, s):
+    async def fake_retrieve(q, k, ns, s, query_vec=None):
         spy["retrieve"] += 1
         return [RetrievedChunk(chunk_id="pu-academic-probation-2023:0",
                                doc_id="pu-academic-probation-2023", title="t", text="ctx",

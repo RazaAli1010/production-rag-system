@@ -176,7 +176,7 @@ def rrf_fuse(
 # ---------------------------------------------------------------- orchestration (T6/T9)
 
 async def hybrid_retrieve(
-    query: str, k: int, namespace: str | None, settings
+    query: str, k: int, namespace: str | None, settings, query_vec: list[float] | None = None
 ) -> list[RetrievedChunk]:
     """Dense (top-`HYBRID_DENSE_TOP_K`) ∥ sparse (top-`HYBRID_SPARSE_TOP_K`) → hydrate sparse-only →
     RRF fuse → up to `HYBRID_FUSED_TOP_K` candidates (the pool F6 rerank consumes, US-6). The seam
@@ -185,7 +185,11 @@ async def hybrid_retrieve(
 
     Degraded mode (AC-14): a dense failure — after the F3 retry budget is exhausted via
     `errors.call_with_retry` — falls back to BM25-only and sets the degraded flag, not raising;
-    BM25 does not depend on Pinecone."""
+    BM25 does not depend on Pinecone.
+
+    F9: `query_vec` is forwarded to the dense half only — BM25 is lexical and has no use for a
+    vector. This is the path the shipped config actually takes (hybrid is on at the F9 gate), so
+    without this forwarding the vector reuse would never happen in practice."""
     _DEGRADED.set(False)
     bm25_cache = await load_bm25(settings)
     sparse = sparse_scores(query, bm25_cache, settings.HYBRID_SPARSE_TOP_K)
@@ -193,7 +197,7 @@ async def hybrid_retrieve(
     try:
         dense = await errors_mod.call_with_retry(
             lambda: retriever_mod.dense_retrieve(
-                query, settings.HYBRID_DENSE_TOP_K, namespace, settings
+                query, settings.HYBRID_DENSE_TOP_K, namespace, settings, query_vec
             ),
             settings=settings,
         )

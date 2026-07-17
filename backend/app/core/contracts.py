@@ -123,6 +123,16 @@ class AnswerResponse(BaseModel):
     session_id: str | None = None
     memory_summarized: bool = False
     cache_hit: bool = False
+    # F9: the tokens this answer cost to produce. The canonical Shared Context contract always
+    # specified these; F3 computed both as locals in `_pipeline_events` and dropped them on the
+    # floor. F9 is the first feature that needs them — a cache hit must report the spend it
+    # avoided (`estimate_cost(model, tokens_in, tokens_out)`) — so F9 restores them. Additive with
+    # defaults, exactly like `degraded` below: every prior F3/F4 path and test is unchanged, and
+    # AnswerResponse is not a table so there is no migration. Riding on `meta` is also what lets
+    # the F4 latency suite compute `cache_cost_saved_mean` without extra plumbing.
+    # `request_id`/`latency_ms` stay absent — F9 has no consumer and F13 owns request identity.
+    tokens_in: int = 0
+    tokens_out: int = 0
     # F5: True when hybrid retrieval fell back to BM25-only because the dense (Pinecone) query
     # failed (AC-14/AC-17). Additive, non-persisted contract field — default False keeps every
     # prior F3/F4 path and test unchanged; no Alembic migration (AnswerResponse is not a table).

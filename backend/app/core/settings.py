@@ -9,7 +9,7 @@ F12's boot/tests don't require unrelated real credentials.
 from pathlib import Path
 from typing import Literal
 
-from pydantic import EmailStr, PostgresDsn, SecretStr
+from pydantic import EmailStr, PostgresDsn, RedisDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -135,6 +135,56 @@ class Settings(BaseSettings):
     COMPRESSION_DEDUPE_NGRAM: int = 5  # word-level n-gram size for the dedupe similarity (AC-4)
     # RERANK_MODEL / RERANK_DEVICE reused for sentence scoring, NOT redefined.
 
+    # --- Semantic cache (F9) ---
+    ENABLE_CACHE: bool = False  # prod/request toggle; False ≡ f8-compression-after path (AC-30)
+    # Hot tier. None => Redis disabled entirely (AC-4): the cache still works Postgres-only, so
+    # local dev and CI need no Redis. `docker/docker-compose.yml` already ships redis:7 locally.
+    REDIS_URL: RedisDsn | None = None
+    CACHE_REDIS_TTL_S: int = 86_400  # 24h exact-match TTL; the Postgres tier has no TTL
+    CACHE_REDIS_TIMEOUT_S: float = 0.25  # a slow hot tier must not out-cost the miss it saves
+    CACHE_KEY_PREFIX: str = "campusrag:cache:"  # also the SCAN pattern for --flush (AC-20)
+    # Accept rule (AC-7): cosine >= threshold AND no discriminative-token disagreement. Both
+    # signals must clear. TUNED at T7 against tests/fixtures/cache/adversarial.jsonl with real
+    # text-embedding-3-small vectors, not guessed — same discipline as REFUSAL_RERANK_THRESHOLD.
+    #
+    # 0.86 (not the specced 0.95): NOTHING in the adversarial set reaches 0.95 — at that threshold
+    # the semantic tier never fires at all. The sets also OVERLAP on cosine (worst adversarial pair
+    # 15(3) vs 15(4) = 0.930 > best true paraphrase 0.912), so cosine alone cannot separate them;
+    # the discriminative veto (keys.discriminators) is what does the separating, and it rejects
+    # 7/10 adversarial pairs with 0 false vetoes. With the veto applied, 0.86 keeps 2/8 paraphrases
+    # at zero collisions with a 0.032 margin over the nearest surviving adversarial pair
+    # ("semester registration deadline" vs "semester withdrawal deadline", 0.828). 0.85 would keep
+    # 3/8 but leave only 0.022; the margin is the scarcer resource, so 0.86 it is.
+    #
+    # That margin is THIN and the honest reason ENABLE_CACHE ships default-off (the F7 precedent).
+    # The Redis exact-match tier carries the real value; the semantic tier is opt-in. Re-run T7's
+    # calibration before widening this — see docs/eval_results/f9-cache-after.md.
+    CACHE_SIMILARITY_THRESHOLD: float = 0.86
+    # Tokens that change WHICH document answers a question rather than how it is phrased. A cache
+    # match is vetoed when the two queries disagree on any of these (years and section ids are
+    # detected structurally in keys.py). A lexical Jaccard floor was specced here and DROPPED: with
+    # the veto in place its optimal value measured 0.0 — it rejected nothing the veto did not
+    # already reject, and no floor that admits real paraphrases (0.125-0.667 Jaccard) excludes the
+    # adversarial pairs (0.4-0.67).
+    #
+    # DEGREE LEVELS ONLY — the issuing bodies `pu`/`hec` were listed here and removed after the T15
+    # live run: they cost a real false veto ("...to sit PU exams" yields {pu} while "...at Punjab
+    # University" yields {}, so two phrasings of ONE question stopped matching), and they buy
+    # nothing — the PU-vs-HEC plagiarism pair they were meant to catch sits at 0.740 cosine, which
+    # CACHE_SIMILARITY_THRESHOLD rejects on its own. Verified: dropping them leaves 0 collisions and
+    # the same 2/8 paraphrases on the committed adversarial set. An entry here must earn its keep by
+    # catching a pair that CLEARS the cosine floor.
+    CACHE_DISCRIMINATIVE_TERMS: list[str] = [
+        "bs", "bsc", "ms", "msc", "mphil", "phd", "adp", "ba", "ma",
+        "undergraduate", "postgraduate", "graduate",
+    ]
+    # Brute-force ceiling: 10k × 1536 float32 = 61 MB resident and a sub-ms matmul — the
+    # justification for having no vector index at all (pgvector stays banned; Pinecone is the
+    # vector store). At the cap, writes evict the least-recently-hit entry (AC-18).
+    # ponytail: single-process matrix. If the API ever runs >1 replica each holds its own — revisit.
+    CACHE_MAX_ENTRIES: int = 10_000
+    # EMBED_MODEL / EMBED_DIM (F2) are reused for the query vector — NOT redefined.
+
     # --- RAG baseline chain (F3) ---
     LLM_MODEL: str = "gpt-4o-mini"  # gpt-4o is F3's "deep mode" toggle, not wired until later
     LLM_MAX_RETRIES: int = 2  # 429/5xx retry budget (AC-21)
@@ -173,6 +223,16 @@ class Settings(BaseSettings):
     # generation fan-out and completes reliably. Same for every label, so deltas stay comparable.
     EVAL_RAGAS_MAX_WORKERS: int = 4
     EVAL_LATENCY_REQUESTS: int = 100  # AC-16
+    # F9: cap the DISTINCT questions the latency suite samples, so `EVAL_LATENCY_REQUESTS` over a
+    # smaller pool produces a deliberate repeat rate (30 requests / 15 unique = 50% repeats). None
+    # = every answerable record, i.e. the pre-F9 behaviour, so earlier labels are unaffected.
+    #
+    # Needed because the repeat rate was otherwise an ACCIDENT of (N mod dataset size): the f9 gate
+    # runs at f8's N=30 against 63 answerable records, where `answerable[i % 63]` for i in 0..29
+    # yields 30 DISTINCT questions and a 0% hit rate — the cache would have measured nothing.
+    # Making the ratio explicit also makes it identical across both labels, which is the only way
+    # the delta compares two pipelines rather than two workloads.
+    EVAL_LATENCY_UNIQUE_QUESTIONS: int | None = None
     EVAL_LATENCY_ENDPOINT: str | None = None  # F11 /api/ask URL; None => in-process astream (AC-17)
     EVAL_CONCURRENCY: int = 4  # bounded async fan-out over records (Semaphore)
     EVAL_DATASET_MIN: int = 60  # 60-80 record range (AC-2)

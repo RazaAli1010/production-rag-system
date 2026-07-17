@@ -239,7 +239,7 @@ async def test_retrieve_rerank_off_is_f5_passthrough(monkeypatch):
     settings = _settings(ENABLE_HYBRID=True)
     pool = [_rc(f"c{i}", dense_score=1.0 - i / 100) for i in range(12)]
 
-    async def _hybrid(query, k, namespace, s):
+    async def _hybrid(query, k, namespace, s, query_vec=None):
         return pool
 
     monkeypatch.setattr("app.rag.hybrid.hybrid_retrieve", _hybrid)
@@ -257,7 +257,7 @@ async def test_retrieve_rerank_on_reranks_pool_to_top_n(monkeypatch):
     logit_of = {f"t{i}": float(i) for i in range(12)}  # higher index → higher relevance
     model = FakeCrossEncoder(logit_of=logit_of)
 
-    async def _hybrid(query, k, namespace, s):
+    async def _hybrid(query, k, namespace, s, query_vec=None):
         assert k == 5  # hybrid_retrieve still receives the generation k (returns the ≤12 pool)
         return pool
 
@@ -279,7 +279,7 @@ async def test_retrieve_rerank_on_dense_only_widens_pool(monkeypatch):
     settings = _settings(ENABLE_RERANK=True, RERANK_CANDIDATE_K=12, RERANK_TOP_N=5)
     seen_k = {}
 
-    async def _dense(query, k, namespace, s):
+    async def _dense(query, k, namespace, s, query_vec=None):
         seen_k["k"] = k
         return [_rc(f"c{i}", text=f"t{i}") for i in range(k)]
 
@@ -327,7 +327,7 @@ async def test_compression_retriever_returns_top_n(monkeypatch):
     async def _get(_s):
         return model
 
-    async def _hybrid(query, k, namespace, s):
+    async def _hybrid(query, k, namespace, s, query_vec=None):
         return [_rc(f"c{i}", text=f"t{i}") for i in range(8)]
 
     monkeypatch.setattr(rerank, "get_rerank_model", _get)
@@ -344,7 +344,7 @@ async def test_compression_retriever_never_on_request_path(monkeypatch):
     # retrieve() with rerank on.
     settings = _settings(ENABLE_HYBRID=True, ENABLE_RERANK=True)
 
-    async def _hybrid(query, k, namespace, s):
+    async def _hybrid(query, k, namespace, s, query_vec=None):
         return [_rc("c0", text="t")]
 
     async def _get(_s):

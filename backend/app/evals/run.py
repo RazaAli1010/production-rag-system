@@ -71,8 +71,12 @@ async def main(argv=None, settings=None, sessionmaker=None) -> int:
         print("error: --suite and --label are required for a run", file=sys.stderr)
         return 2
 
+    suites = expand_suites(args.suite)
     try:
-        flags = parse_flags(args.flags)
+        # F9/AC-33: only a latency-ONLY run may measure the cache path — that is exactly F9's eval
+        # gate (CLAUDE.md scopes it to "latency/cost suites only"). `--suite all` still forces cache
+        # off, so no retrieval/RAGAS/refusal number can ever come from a cache hit.
+        flags = parse_flags(args.flags, allow_cache=(suites == ["latency"]))
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -80,7 +84,7 @@ async def main(argv=None, settings=None, sessionmaker=None) -> int:
     cfg = EvalConfig(
         label=args.label,
         flags=flags,
-        suites=expand_suites(args.suite),
+        suites=suites,
         confirm=args.yes,
     )
     report = await run_suites(cfg, settings=settings, sessionmaker=sessionmaker)

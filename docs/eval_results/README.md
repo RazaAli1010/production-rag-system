@@ -130,3 +130,78 @@ floor to chase the last 2 points would deepen that regression. Ships **default-o
 > **delta** is the comparable signal. `EVAL_RAGAS_MAX_WORKERS=4` caps the judge fan-out (the library
 > default storms a rate-limited tier into a stall). The `f7-rewrite-after` baseline was re-run to add
 > the ragas/latency rows (the prior commit was retrieval-only) — see the delta's provenance note.
+
+## ⚠️ Before ANY eval run: reseed the corpus
+
+`tests/rag/conftest.py` (and `tests/indexing`, `tests/ingestion`) truncate `chunks`/`documents` in
+the **same database** dev and eval runs use — there is no separate test DB. `citations.
+parse_citations` resolves every `[n]` marker by joining those tables, so once they are empty **every
+answer is refused (`no_grounded_claims`) even though the LLM emitted a correct `[1]`-cited answer.**
+Retrieval still works (Pinecone is untouched), so hit@k looks fine while every generated answer is
+discarded.
+
+Measured 2026-07-17 over 6 dataset questions, identical config: **0/6** answers cited with the tables
+empty → **6/6** after reseeding. **This is what `false_refusal_rate = 1.0000` and 57/75
+`refusals_no_grounded_claims` in the f7/f8 deltas are recording** — those labels were measured on a
+corpus-less DB, not a model or prompt failure.
+
+```bash
+cd backend
+python -m app.ingestion.run --all                             # re-registers docs (dedupe_skip, no re-download)
+python -m app.indexing.run --strategy fixed --namespace all   # rewrites chunks + upserts Pinecone (~$0.0003)
+```
+
+Ingestion must run **first** — `indexing.source.indexed_targets` reads its targets from the
+`documents` table, so indexing alone reports "indexed 0 docs". Do not run pytest between the reseed
+and the eval run.
+
+## F9 — Semantic cache (Redis + Postgres) · gate: `f9-cache-after` vs `f8-compression-after`
+
+Delta report: [`f9-cache-after-vs-f8-compression-after.md`](f9-cache-after-vs-f8-compression-after.md)
+(**latency/cost suites only**, per the CLAUDE.md label-sequence note; same 588-chunk index). Two-tier
+cache: Redis exact-match on `sha256(normalized_query)` checked *before* embedding, then a Postgres
+`cache_entries` semantic tier searched by an in-process cosine matmul. Reproduce:
+
+```bash
+cd backend && set -a && . ./.env && set +a
+# reseed first (see above), then:
+export EVAL_LATENCY_REQUESTS=30 EVAL_LATENCY_UNIQUE_QUESTIONS=15   # a DECLARED 50% repeat rate
+python -m app.caching.run --flush
+python -m app.evals.run --suite latency \
+    --flags hybrid=on,rerank=on,query_rewrite=on,compression=on,cache=off,memory=off \
+    --label f8-compression-after --yes          # re-seeds the baseline at the matched workload
+python -m app.caching.run --flush
+python -m app.evals.run --suite latency \
+    --flags hybrid=on,rerank=on,query_rewrite=on,compression=on,cache=on,memory=off \
+    --label f9-cache-after --yes
+python -m app.evals.run --label f9-cache-after --compare f8-compression-after
+```
+
+**Result (overall):** `cache_hit_rate` **0 → 0.500 ▲** — the workload's structural maximum (15
+entries, 15 hits, one per entry; all 15 unique questions produced cacheable cited answers). **p50
+latency 40.4 s → 3.9 s (−36.6 s, 10.5× ▲)** — at a 50% hit rate the median request *is* a hit. p95
+−3.2 s and p99 −98.8 s (both still sit on the miss path). **The miss path got faster, not slower**
+(`latency_searching_p50` −3.7 s ▲) — the gate's designated failure signal, since a miss-path
+regression would mean the `query_vec` reuse was broken and the pipeline double-embedding. `$ saved`
+**4.241e-05/request** (the table's 0.0000 is %.4f display precision, exactly as `cost_mean` has
+always rendered).
+
+**The `< 300 ms` AC is MISSED at 3,859 ms, structurally.** The cache key is F7's normalized question,
+so with rewrite on a ~3.5 s `gpt-4o-mini` call precedes every lookup. Only the Redis exact tier can
+clear 300 ms, and it was unmeasurable here (no Docker/Redis on the dev box) — the AC stands
+**unverified**, not passed. Verified live instead: an exact repeat hits, replays byte-identically,
+**18×** faster (69.2 s → 3.8 s).
+
+**Ships default-off** (`ENABLE_CACHE=false`), A/B-gated. The semantic accept rule specced as
+`cosine ≥ 0.95 AND Jaccard ≥ 0.3` was **measurably wrong** — against real `text-embedding-3-small`
+vectors nothing reaches 0.95, and the two sets *overlap* (worst adversarial pair `15(3)` vs `15(4)` =
+**0.930** > best true paraphrase = **0.912**), so no cosine threshold separates them and the Jaccard
+floor is inert (optimal 0.0). What ships is `cosine ≥ 0.86 AND discriminative-token agreement`:
+0 collisions on the committed set, but only **2/8** paraphrases at a **0.032** margin. Also measured:
+**code-switched queries never hit** (0.33–0.47 cosine against their English twins) unless F7's
+rewrite is on to normalize them first. Evidence: `backend/tests/cache/test_adversarial.py` (offline,
+vectors committed).
+
+> `tokens_mean` **33.0 → 17.0** and `cost_mean` in this delta are **artifacts, not wins** — a hit
+> replays the answer as one `token` event and `tokens_mean` counts events. Both were deliberately
+> left on their pre-F9 basis so the delta compares two pipelines, not two measurements.

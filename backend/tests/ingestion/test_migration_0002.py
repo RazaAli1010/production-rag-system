@@ -51,7 +51,9 @@ async def test_downgrade_one_removes_f1_columns(engine):
     up = _run_alembic("upgrade", "head")
     assert up.returncode == 0, up.stderr
 
-    down = _run_alembic("downgrade", "-1")
+    # Downgrade to the revision BEFORE 0002 by name, not `-1`: `-1` meant "undo 0002" only while
+    # 0002 happened to be head, so it silently stopped testing this the moment F9 added 0003.
+    down = _run_alembic("downgrade", "0001")
     assert down.returncode == 0, down.stderr
 
     async with engine.connect() as conn:
