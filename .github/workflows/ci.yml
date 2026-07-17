@@ -29,6 +29,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
 
     steps:
       - uses: actions/checkout@v4
@@ -89,6 +90,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
 
     steps:
       - uses: actions/checkout@v4
@@ -154,6 +156,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
       OPENAI_API_KEY: sk-ci-only-placeholder
       PINECONE_API_KEY: pc-ci-only-placeholder
       PINECONE_INDEX: campus-rag-ci
@@ -223,6 +226,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
       OPENAI_API_KEY: sk-ci-only-placeholder
       PINECONE_API_KEY: pc-ci-only-placeholder
       PINECONE_INDEX: campus-rag-ci
@@ -299,6 +303,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
       OPENAI_API_KEY: sk-ci-only-placeholder
       PINECONE_API_KEY: pc-ci-only-placeholder
       PINECONE_INDEX: campus-rag-ci
@@ -373,6 +378,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
       OPENAI_API_KEY: sk-ci-only-placeholder
       PINECONE_API_KEY: pc-ci-only-placeholder
       PINECONE_INDEX: campus-rag-ci
@@ -424,3 +430,81 @@ jobs:
             exit 1
           fi
           ruff check app/evals
+
+  auth:
+    name: F10 auth — flow, RBAC matrix, lockout, async + secrets guards
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
+      OPENAI_API_KEY: sk-ci-only-placeholder
+      PINECONE_API_KEY: pc-ci-only-placeholder
+      PINECONE_INDEX: campus-rag-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Auth tests (no external providers are involved at all — F10 makes zero OpenAI calls.
+          Postgres is real because refresh_tokens IS the blacklist and login_attempts IS the
+          lockout window, so faking the DB would fake the feature.)
+        working-directory: backend
+        run: pytest tests/auth -v
+
+      - name: Async-guard (no sync SQLAlchemy, blocking requests, or sync redis in app/auth —
+          bcrypt is the one CPU-bound call and must go through anyio.to_thread.run_sync)
+        working-directory: backend
+        run: |
+          set -e
+          if grep -RnE "import requests\b|from redis import(?!\.asyncio)|^\s*import redis$" app/auth app/api; then
+            echo "Blocking requests / sync redis import found in app/auth|app/api — forbidden by the async-everywhere rule." >&2
+            exit 1
+          fi
+          if grep -RnE "create_engine\(" app/auth app/api; then
+            echo "Sync create_engine() found in app/auth|app/api — use create_async_engine instead." >&2
+            exit 1
+          fi
+          ruff check app/auth app/api app/core/security.py app/core/exceptions.py app/main.py
+
+      - name: Bcrypt-guard (AC-15 — every hash/verify goes through core/security.py, which is the
+          one module that wraps them in anyio.to_thread.run_sync. A CryptContext anywhere else is
+          a blocking bcrypt call on the event loop.)
+        working-directory: backend
+        run: |
+          set -e
+          if grep -RnE "CryptContext|passlib" app --include="*.py" | grep -v "^app/core/security.py:"; then
+            echo "passlib/CryptContext used outside app/core/security.py — route hashing through hash_password/verify_password so it stays off the event loop." >&2
+            exit 1
+          fi
