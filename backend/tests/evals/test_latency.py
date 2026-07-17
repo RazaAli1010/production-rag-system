@@ -19,7 +19,7 @@ def test_percentiles_single_value():
 
 
 async def test_run_latency_reads_stage_ms_and_counts_tokens():
-    async def fake_astream(q, k, ns, flags, *, session, settings):
+    async def fake_astream(q, k, ns, flags, *, session, settings, sessionmaker=None):
         yield stage_event("searching", "started")
         yield stage_event("searching", "done", ms=10)
         yield stage_event("generating", "started")

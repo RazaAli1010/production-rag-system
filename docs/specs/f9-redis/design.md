@@ -14,7 +14,7 @@ backend/app/caching/                   NEW package
 ├── redis_hot.py                       NEW  redis.asyncio client, fail-open get/set/flush
 ├── store.py                           NEW  SemanticCache: matrix, lookup, write, evict, flush
 │                                           + module-level lookup()/schedule_write() seam
-└── run.py                             NEW  CLI: --flush | --delete-request-id <id>
+└── run.py                             NEW  CLI: --flush | --delete-query "<question>"
 
 backend/app/rag/
 ├── baseline.py                        CHANGED  cache seam spliced into _pipeline_events; hit replay
@@ -25,9 +25,11 @@ backend/app/rag/
 └── (prompt/context/rerank/compression/citations/refusal/errors/events)   UNCHANGED
 
 backend/app/core/settings.py           CHANGED  + "Semantic cache (F9)" block
-backend/app/db/models/ops.py           CHANGED  + CacheEntry.query_hash, CacheEntry.request_id
+backend/app/core/contracts.py          CHANGED  + AnswerResponse.tokens_in / .tokens_out  (AC-27b)
+backend/app/indexing/manifest.py       CHANGED  + manifest_id()  (reuses read_manifest)
+backend/app/db/models/ops.py           CHANGED  + CacheEntry.query_hash
 backend/app/db/migrations/versions/
-└── 0003_f9_cache_entry_keys.py        NEW      the only schema change
+└── 0003_f9_cache_entry_query_hash.py  NEW      the only schema change
 
 backend/app/evals/
 ├── flags.py                           CHANGED  parse_flags(spec, *, allow_cache=False)  (AC-32)
@@ -36,10 +38,12 @@ backend/app/evals/
 
 backend/tests/cache/                   NEW  conftest, test_keys, test_store, test_redis_hot,
                                             test_adversarial, test_run, test_acceptance,
+                                            test_migration_0003, test_no_sync_calls,
                                             test_settings_schemas
+backend/tests/fixtures/cache/
+└── adversarial.jsonl                  NEW  the committed collision set (T7 calibration)
 backend/pyproject.toml                 CHANGED  + redis==5.2.1
-.github/workflows/ci.yml               CHANGED  sync-twin grep glob += app/caching/*.py
-backend/tests/rag/test_generation.py   CHANGED  same glob
+.github/workflows/ci.yml               CHANGED  NEW `caching:` job (mirrors `rag:`) — see §9.1
 ```
 
 ## 2. Key design decision: where does the query vector come from?
@@ -173,16 +177,25 @@ class SemanticCache:
     async def lookup(self, normalized: str, vec: list[float], *, settings,
                      sessionmaker) -> tuple[AnswerResponse, float] | None: ...      # AC-6..10
     async def write(self, normalized: str, vec: list[float], response: AnswerResponse,
-                    request_id: str, *, settings, sessionmaker) -> None: ...        # AC-17/18/19
+                    *, settings, sessionmaker) -> None: ...                         # AC-17/18/19
     async def flush(self, *, settings, sessionmaker) -> int: ...                    # AC-20
-    async def delete_by_request_id(self, request_id: str, *, sessionmaker) -> int:  # AC-21
-        ...
+    async def delete_by_query(self, query: str, *, settings, sessionmaker) -> int:  # AC-21
+        """normalize -> query_hash -> delete from Postgres + Redis + matrix. Returns rows deleted."""
 
-def schedule_write(normalized, vec, response, request_id, *, settings, sessionmaker) -> None:
+def schedule_write(normalized, vec, response, *, settings, sessionmaker) -> None:
     """Fire-and-forget the write (AC-14/15). Holds the task in a module-level set and discards it
-    on completion — an un-referenced task can be GC'd mid-await."""
+    on completion — an un-referenced task can be GC'd mid-await. `response` already carries
+    `tokens_in`/`tokens_out` (AC-27b), so the write needs no separate token arguments."""
 
 async def lookup(normalized, vec, *, settings, sessionmaker): ...   # module-level seam over the singleton
+
+
+# app/indexing/manifest.py — NEW (F2 owns the manifest; F9 only needs a stable id for it)
+async def manifest_id(settings) -> str:
+    """`sha256(manifest.model_dump_json())[:16]`, or `"none"` when no manifest exists. `Manifest`
+    (indexing/schemas.py) has no id field, and a content hash changes iff the index changes — which
+    is exactly the invalidation signal `cache_entries.index_manifest_id` needs. Reuses
+    `read_manifest` verbatim."""
 
 
 # app/rag/retriever.py — NEW + CHANGED
@@ -211,32 +224,46 @@ def log_cache(hit: bool, tier: str, cosine: float | None, jaccard: float | None,
     (AC-27) — mirrors log_rerank/log_rewrite/log_compression: a structlog emit, no rate table."""
 ```
 
-## 5. The lookup, in design intent
+## 5. The lookup, in design intent — **rewritten after T7's calibration**
 
-The two-signal accept rule is the whole feature. Cosine ≥ 0.95 says *these questions are about the
-same thing*; it does not say *these questions have the same answer*. "What is the BS admission
-deadline?" and "What is the MPhil admission deadline?" are ~0.97 cosine under
-`text-embedding-3-small` — near-identical syntax, one swapped noun — and have entirely different
-answers with different citations. Serving one for the other is exactly the hallucination-shaped
-failure this project refuses to ship.
+The two-signal accept rule is the whole feature. Cosine says *these questions are about the same
+thing*; it does not say *these questions have the same answer*. Serving one for the other is exactly
+the hallucination-shaped failure this project refuses to ship.
 
-The lexical guard catches it because the discriminating token (`bs` vs `mphil`) is a *content word*
-that embedding similarity averages away but set overlap does not:
+**This section originally predicted the numbers. T7 measured them and the predictions were wrong in
+ways that changed the design** — recorded here rather than quietly corrected, because the wrong
+version is the intuition a reader will arrive with.
 
-```
-terms("what is the bs admission deadline")    = {what, bs, admission, deadline}
-terms("what is the mphil admission deadline") = {what, mphil, admission, deadline}
-jaccard = 3/5 = 0.60   ── clears 0.3, so cosine+lexical alone is NOT sufficient here
-```
+| Predicted (pre-T7) | Measured (T7, real `text-embedding-3-small`) |
+|---|---|
+| BS vs MPhil admission deadline ~0.97 — the motivating collision | **0.606.** The model discriminates them fine. Not a collision risk at all. |
+| Threshold 0.95 is a sensible default | **Unreachable.** Nothing in the set scores ≥ 0.95 — the highest pair is 0.930. At 0.95 the semantic tier never fires once. |
+| Cosine + Jaccard separates the sets | **The sets overlap.** Worst adversarial pair (`15(3)` vs `15(4)`, **0.930**) outscores the best true paraphrase (0.912). No cosine threshold separates them, and the best (cosine, Jaccard) pair keeps **1 of 8** paraphrases. |
+| Jaccard ≥ 0.3 is the load-bearing guard | **Inert.** With the veto in place its optimal value is **0.0**. Adversarial pairs score 0.4–0.67 Jaccard — *above* every floor that still admits real paraphrases (0.125–0.667). Dropped from Settings entirely. |
+| The discriminative-term rule is a fallback | **It is the rule.** Vetoes 7/10 adversarial pairs with **0** false vetoes. |
 
-So the guard is calibrated at **T7 against the committed adversarial set**, not guessed: the shipped
-`CACHE_SIMILARITY_THRESHOLD` / `CACHE_LEXICAL_JACCARD_MIN` pair must separate every adversarial pair
-from every true-paraphrase pair, and T7's job is to find that pair of numbers and record them — the
-same "tune, don't guess" discipline `REFUSAL_RERANK_THRESHOLD` got at the F6 gate. If no threshold
-pair separates the two sets, the fallback is a **discriminative-term rule**: reject when either query
-carries a `CACHE_DISCRIMINATIVE_TERMS` token (degree levels, `bs|ms|mphil|phd|adp`, and any numeric
-section id) the other lacks. T7 documents which rule shipped and why. Being unable to defend the
-threshold is a reason to ship the cache default-off, not a reason to loosen the threshold.
+The real collision risks are not swapped nouns but **near-identical strings differing by one
+identifier**: `15(3)` vs `15(4)` (0.930), 2023 vs 2024 fee schedule (0.897), undergraduate vs
+postgraduate CGPA (0.886). What separates them is *which* token differs — one that changes which
+document or row answers the question. Hence `keys.discriminators`: degree levels and issuing bodies
+(`CACHE_DISCRIMINATIVE_TERMS`), plus years and section ids detected structurally.
+
+**Shipped:** `cosine >= 0.86 AND discriminators(a) == discriminators(b)`. Zero collisions on the
+committed set; keeps 2/8 paraphrases; margin **0.032** over the nearest surviving adversarial pair
+("semester registration deadline" vs "semester withdrawal deadline", 0.828). 0.85 would keep 3/8 at
+a 0.022 margin — declined; the margin is the scarcer resource.
+
+**Two consequences that belong in the gate report, not in a footnote:**
+
+1. **The margin is thin.** 0.032 is not a comfortable separation, and it is measured on 18 hand-built
+   pairs. This is the honest reason `ENABLE_CACHE` ships **default-off** — the same call
+   `ENABLE_QUERY_REWRITE` got at the F7 gate. The Redis exact-match tier is safe and carries the
+   real value; the semantic tier is opt-in.
+2. **Code-switched queries never hit** (0.33–0.47 cosine against their English twins).
+   `text-embedding-3-small` does not map Urdu transliteration onto English. Since F7's rewrite also
+   ships default-off, the project's core user — the student typing "probation se kaise nikalta
+   hoon" — gets **nothing** from the semantic tier unless rewrite is enabled to normalize the query
+   to English first. The exact tier still serves them on a true repeat.
 
 ## 6. Error handling
 
@@ -267,14 +294,18 @@ cache error that produces a non-200 for the user.
     CACHE_REDIS_TTL_S: int = 86_400  # 24h exact-match TTL (brief §1); Postgres tier has no TTL
     CACHE_REDIS_TIMEOUT_S: float = 0.25  # a slow hot layer must not out-cost the miss it saves (AC-3)
     CACHE_KEY_PREFIX: str = "campusrag:cache:"  # SCAN pattern for --flush (AC-20)
-    # Accept rule (AC-7). BOTH must clear. Cosine alone collides near-identical-syntax/different-noun
-    # pairs at ~0.97 ("BS admission deadline" vs "MPhil admission deadline") — design §5.
-    # TUNED at T7 against tests/fixtures/cache/adversarial.jsonl, not guessed.
-    CACHE_SIMILARITY_THRESHOLD: float = 0.95
-    CACHE_LEXICAL_JACCARD_MIN: float = 0.3
-    # Fallback guard if T7 finds no separating threshold pair (design §5): reject a match when either
-    # query carries one of these discriminating tokens the other lacks.
-    CACHE_DISCRIMINATIVE_TERMS: list[str] = ["bs", "ms", "mphil", "phd", "adp", "bsc", "msc"]
+    # Accept rule (AC-7): cosine >= threshold AND no discriminator disagreement. TUNED at T7
+    # against tests/fixtures/cache/adversarial.jsonl with real embeddings — see design §5 for what
+    # the calibration overturned. 0.86 keeps 2/8 paraphrases, 0 collisions, 0.032 margin.
+    CACHE_SIMILARITY_THRESHOLD: float = 0.86
+    # The veto's editable vocabulary (years + section ids are structural, in keys.py). This is THE
+    # separating signal, not a fallback: it rejects 7/10 adversarial pairs with 0 false vetoes.
+    CACHE_DISCRIMINATIVE_TERMS: list[str] = [
+        "bs", "bsc", "ms", "msc", "mphil", "phd", "adp", "ba", "ma",
+        "undergraduate", "postgraduate", "graduate", "pu", "hec",
+    ]
+    # CACHE_LEXICAL_JACCARD_MIN was specced here and DROPPED: measured optimal 0.0 once the veto
+    # exists (design §5). A knob that never fires is worse than no knob — it implies it works.
     # Brute-force ceiling: 10k × 1536 float32 = 61 MB resident, sub-ms matmul — the justification for
     # having no vector index (brief §1). At the cap, writes evict least-recently-hit (AC-18).
     # ponytail: single-process matrix; if the API ever runs >1 replica, revisit (requirements §5).
@@ -287,18 +318,16 @@ cache error that produces a non-200 for the user.
 
 ## 8. Alembic migrations
 
-**One:** `0003_f9_cache_entry_keys.py` (`down_revision = "0002"`).
+**One:** `0003_f9_cache_entry_query_hash.py` (`down_revision = "0002"`).
 
 F12's `0001_initial.py` already created `cache_entries` with `id`, `query_text`, `embedding` (BYTEA),
 `answer` (JSONB), `index_manifest_id`, `hits`, `created_at`, `last_hit_at` — F9 does **not** recreate
-any of that, and `embedding` stays `LargeBinary` (no pgvector). Two columns are genuinely missing:
+any of that, and `embedding` stays `LargeBinary` (no pgvector). Exactly one column is missing:
 
 - **`query_hash`** (`String`, NOT NULL, **unique** `uq_cache_entries_query_hash`) — without it the
   write path has no upsert key and re-asking a cached question inserts a duplicate row every time,
-  growing the matrix without bound (AC-17). Not derivable from `query_text` in SQL cheaply enough to
-  index.
-- **`request_id`** (`String`, nullable, indexed `ix_cache_entries_request_id`) — poison control by
-  request id (AC-21, brief §4). Nullable because `--flush`-era and CLI-seeded rows have none.
+  growing the matrix without bound (AC-17). It is also what `--delete-query` keys on (AC-21). Not
+  derivable from `query_text` in SQL cheaply enough to index.
 
 ```python
 def upgrade() -> None:
@@ -306,9 +335,15 @@ def upgrade() -> None:
                                              server_default=""))
     op.alter_column("cache_entries", "query_hash", server_default=None)
     op.create_unique_constraint("uq_cache_entries_query_hash", "cache_entries", ["query_hash"])
-    op.add_column("cache_entries", sa.Column("request_id", sa.String(), nullable=True))
-    op.create_index("ix_cache_entries_request_id", "cache_entries", ["request_id"], unique=False)
 ```
+
+**No `request_id` column** — the brief asks for poison control by request id, but nothing in the
+pipeline generates a request id yet (F13 owns request logging), so the column would be `NULL` on every
+row F9 writes. `--delete-query` delivers the same operator capability on the `query_hash` column F9
+needs anyway. See requirements AC-21 for the full rationale.
+
+The cached token counts (AC-17b) need no column either: they ride inside the existing `answer` JSONB
+now that `AnswerResponse` carries `tokens_in`/`tokens_out` (AC-27b).
 
 The `server_default=""` + drop dance is only for the (empty in practice) existing-rows case; names are
 spelled out to match `base.py`'s naming convention so a post-upgrade `--autogenerate` diff is empty
@@ -348,12 +383,24 @@ flags = parse_flags(args.flags, allow_cache=(expand_suites(args.suite) == ["late
 explicit `--suite latency --flags cache=on` can turn it on, which is precisely T13's gate command.
 `latency.py:121`'s hardcoded `"skip_cache": True` becomes `not flags.cache` (AC-33).
 
-**The repeat-heavy workload is already there.** `run_latency` samples
-`answerable[i % len(answerable)]` for `EVAL_LATENCY_REQUESTS` requests — deterministic, identical
-across labels, and with N > len(answerable) every question after the first pass is an exact repeat.
-That IS the repeat workload the brief asks for; no new setting. The first pass populates, the rest
-hit, and the hit rate is a known function of N — which is why T13 must run **both** labels at the
-same N (f8's report was trimmed to 30 requests; match it).
+**The repeat-heavy workload needs one new setting — `EVAL_LATENCY_UNIQUE_QUESTIONS`.**
+
+This section originally claimed no new setting was needed: `run_latency` samples
+`answerable[i % len(answerable)]`, so "with N > len(answerable) every question after the first pass
+is an exact repeat". True — but **N is not > len(answerable)**. `f8-compression-after`'s latency
+suite ran at **N=30** (its provenance note: the default 100 was "intractable under this tier's rate
+limit"), and the dataset has **63 answerable records**. For `i` in 0..29, `answerable[i % 63]` yields
+30 **distinct** questions: zero repeats, and a cache hit rate of **0%**. The gate would have measured
+a cache that never fires. (The tell was in the gate's own DoD formula: `1 - len(answerable)/N` at
+N=30 is *negative*.)
+
+Raising N to ≥126 (two passes) would fix the repeats without new config, but at ~35s/request that is
+~73 minutes for the f8 baseline alone and runs straight into the rate limit f8 already documented.
+
+So the pool gets an explicit cap: `EVAL_LATENCY_UNIQUE_QUESTIONS=15` with `EVAL_LATENCY_REQUESTS=30`
+is a declared 50% repeat rate at f8's proven N. `None` (the default) samples every record — the
+pre-F9 behaviour, so no earlier label's workload changes. Both labels must run with the SAME N *and*
+the same cap, or the delta compares two workloads rather than two pipelines.
 
 **Metric naming is load-bearing** for `compare.py`'s direction arrows, which key off prefixes
 (`_LOWER_IS_BETTER_PREFIXES = ("latency_", "cost_", "tokens_mean", "false_refusal_rate")`):
@@ -368,13 +415,51 @@ same N (f8's report was trimmed to 30 requests; match it).
 So **`compare.py` needs no change** — the naming does the work. That is the reason for these exact
 names.
 
+**`cost_mean` and `tokens_mean` must NOT change.** Both are already recorded at
+`f8-compression-after` on a fixed basis: `cost_mean` is deliberately output-only (`latency.py:96`,
+"prompt tokens aren't exposed on the SSE stream") and `tokens_mean` counts `token` *events*. Once
+AC-27b puts `tokens_in` on `meta`, it becomes tempting to upgrade `cost_mean` into a full per-request
+cost — doing so would silently change the metric's basis between the two labels and turn the gate's
+delta row into a comparison of two different measurements. `cache_cost_saved_mean` is added as a
+**new** metric precisely so the existing two can stay frozen.
+
+Related, and worth stating in the gate report rather than discovering in review: **`tokens_mean` is
+uninterpretable on a cache-on run.** A hit emits ONE `token` event carrying the whole answer (AC-24),
+so `tokens_mean` collapses toward 1 and reads as a spectacular token reduction. It is a stream
+artifact, not a saving.
+
+### 9.1 The `caching:` CI job (AC-29b)
+
+CI does not have one shared async-guard glob to widen — it has a **per-package job**, each with its
+own guard block: `app/db` (line 55), `app/ingestion` (116), `app/indexing` (184), `app/rag` (256),
+`app/evals` (331). So F9 adds a `caching:` job mirroring the `rag:` one (Postgres service →
+`alembic upgrade head` → `pytest tests/cache -v` → guard → `ruff check app/caching`), reusing the
+`rag:` guard's patterns verbatim:
+
+```
+\.embed_documents\(|\.embed_query\(|import requests\b|from redis import(?!\.asyncio)|^\s*import redis$
+\.invoke\(          create_engine\(
+```
+
+Two consequences for the implementation: `redis.asyncio` must be imported as
+`import redis.asyncio as redis` (the guard bans bare `import redis` and `from redis import …`), and
+the embedding must be `.aembed_query(` (which does not match the banned `.embed_query(`). Without this
+job, `app/caching` would be the single module that talks to Redis and is *not* covered by the async
+mandate — the exact inversion of the rule's purpose.
+
 ## 10. Honoring the Shared Context contracts & the F3/F5/F6/F7 seam
 
-- **`AnswerResponse`** — unchanged. `cache_hit: bool = False` already exists (`contracts.py:125`); F9
-  is the first writer of `True`. The two hardcoded `cache_hit=False` construction sites in
-  `baseline.py` (157 refusal, 224 normal) stay `False` — a refusal is never cached (AC-16) and a
-  freshly generated answer is by definition not a hit. The hit path constructs its own from the
-  cached JSONB.
+- **`AnswerResponse`** — `cache_hit: bool = False` already exists (`contracts.py:125`); F9 is the
+  first writer of `True`. The two hardcoded `cache_hit=False` construction sites in `baseline.py`
+  (157 refusal, 216 normal) stay `False` — a refusal is never cached (AC-16) and a freshly generated
+  answer is by definition not a hit. The hit path constructs its own from the cached JSONB.
+  F9 **adds `tokens_in: int = 0` and `tokens_out: int = 0`** (AC-27b) — restoring two fields the
+  canonical Shared Context contract always specified and the F3 implementation dropped.
+  `_pipeline_events` already computes both as locals (`baseline.py:200-201`) and discards them, so
+  this surfaces existing values rather than measuring anything new. Additive with defaults → every
+  prior F3/F4 path and test is unchanged; `AnswerResponse` is not a table → no migration (the same
+  reasoning `degraded` was added under at F5, `contracts.py:126-129`). `request_id`/`latency_ms`
+  stay absent: F9 has no consumer and F13 owns request identity.
 - **`PipelineFlags`** — unchanged. `cache: bool = False` already exists (`contracts.py:102`); F9 wires
   it through `apply_flags`, the same one-line pattern F5–F8 each added.
 - **`StageEvent`** — unchanged. `contracts.py:93` types `stage` as a free-form `str`, and

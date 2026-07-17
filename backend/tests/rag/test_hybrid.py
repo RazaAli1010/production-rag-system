@@ -217,7 +217,7 @@ def test_rrf_fuse_drops_unhydratable_sparse_only():
 async def test_hybrid_retrieve_degrades_to_bm25_on_dense_failure(monkeypatch):
     settings = _settings()
 
-    async def _failing_dense(query, k, namespace, s):
+    async def _failing_dense(query, k, namespace, s, query_vec=None):
         raise RuntimeError("pinecone down")
 
     async def _fake_load(s):
@@ -240,7 +240,7 @@ async def test_hybrid_retrieve_degrades_to_bm25_on_dense_failure(monkeypatch):
 async def test_hybrid_retrieve_healthy_is_not_degraded(monkeypatch):
     settings = _settings()
 
-    async def _ok_dense(query, k, namespace, s):
+    async def _ok_dense(query, k, namespace, s, query_vec=None):
         return [_rc("a:0", dense_score=0.9)]
 
     async def _fake_load(s):
@@ -285,7 +285,7 @@ async def test_dense_only_mode_is_identical_to_dense_retrieve(monkeypatch):
     settings = _settings()  # ENABLE_HYBRID False, RETRIEVAL_MODE None → dense_only
     sentinel = [_rc("d:0", dense_score=0.9)]
 
-    async def _dense(query, k, namespace, s):
+    async def _dense(query, k, namespace, s, query_vec=None):
         return sentinel
 
     monkeypatch.setattr(retriever, "dense_retrieve", _dense)
@@ -306,7 +306,7 @@ async def test_hybrid_mode_dispatches_and_truncates_to_k(monkeypatch):
     settings = _settings(ENABLE_HYBRID=True)
     pool = [_rc(f"c{i}", dense_score=1.0 - i / 100) for i in range(12)]
 
-    async def _hybrid(query, k, namespace, s):
+    async def _hybrid(query, k, namespace, s, query_vec=None):
         return pool
 
     monkeypatch.setattr(hybrid, "hybrid_retrieve", _hybrid)

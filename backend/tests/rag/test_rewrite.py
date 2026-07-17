@@ -205,7 +205,7 @@ async def test_multi_query_retrieve_fans_out_and_single_reranks(monkeypatch):
 
     gathered = []
 
-    async def _fake_gather(q, k, ns, settings):
+    async def _fake_gather(q, k, ns, settings, query_vec=None):
         gathered.append(q)
         return [_rc(f"{q}:0"), _rc(f"{q}:1")]
 
@@ -229,7 +229,7 @@ async def test_multi_query_retrieve_fans_out_and_single_reranks(monkeypatch):
 
 
 async def test_multi_query_retrieve_truncates_when_rerank_off(monkeypatch):
-    async def _fake_gather(q, k, ns, settings):
+    async def _fake_gather(q, k, ns, settings, query_vec=None):
         return [_rc(f"{q}:{i}") for i in range(4)]
 
     monkeypatch.setattr(rewrite.retriever_mod, "gather_candidate_pool", _fake_gather)
@@ -246,7 +246,7 @@ async def test_retrieve_delegates_to_retriever_when_flag_off(monkeypatch):
     sentinel = [_rc("f6:0"), _rc("f6:1")]
     called = {"retrieve": False, "rewrite": False}
 
-    async def _fake_retrieve(query, k, ns, settings):
+    async def _fake_retrieve(query, k, ns, settings, query_vec=None):
         called["retrieve"] = True
         return sentinel
 
@@ -268,7 +268,7 @@ async def test_retrieve_runs_rewrite_and_stashes_result_when_on(monkeypatch):
     async def _fake_rewrite(query, memory, settings):
         return rewrite.RewriteResult(normalized="norm", variants=["v"], language="ur-mix")
 
-    async def _fake_multi(rr, k, ns, settings):
+    async def _fake_multi(rr, k, ns, settings, query_vec=None):
         return [_rc("x")]
 
     monkeypatch.setattr(rewrite, "rewrite_query", _fake_rewrite)

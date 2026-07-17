@@ -11,14 +11,20 @@ import tiktoken
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_openai import ChatOpenAI
+from pydantic import ValidationError
 
+from app.caching import keys, redis_hot
+from app.caching import store as cache_store
 from app.core.contracts import AnswerResponse, MemoryContext
+from app.db.engine import get_sessionmaker
+from app.indexing.cost import estimate_cost
 from app.rag import citations as citations_mod
 from app.rag import compression as compression_mod
 from app.rag import context, observability, prompt, refusal
 from app.rag import errors as errors_mod
 from app.rag import flags as flags_mod
 from app.rag import hybrid as hybrid_mod
+from app.rag import retriever as retriever_mod
 from app.rag import rewrite as rewrite_mod
 from app.rag.events import SSEEvent, stage_event
 from app.rag.schemas import PipelineFlags
@@ -92,6 +98,83 @@ async def _stream_chain_with_retry(chain, chain_input, config, settings):
             continue  # not yet yielded anything, retryable, budget remains: retry from scratch
 
 
+async def _cache_lookup(query, memory, settings, sessionmaker):
+    """F9's lookup seam (design §3). Returns `(hit_or_None, rr, normalized, query_vec, lookup_ms)`.
+
+    Order matters and is the design: Redis exact-match is checked BEFORE embedding, so an exact
+    repeat costs one Redis round-trip and no OpenAI call at all. Only on a hot miss do we embed —
+    once — and that same vector is handed back for the miss path to retrieve with, so a miss is
+    cheaper than the pre-F9 path rather than more expensive (design §2).
+
+    `rr` is computed here because the cache key IS F7's standalone question; it is handed back so
+    `rewrite.retrieve` does not pay for a second rewrite on a miss (AC-12).
+    """
+    t0 = time.monotonic()
+    rr = None
+    if settings.ENABLE_QUERY_REWRITE:
+        rr = await rewrite_mod.rewrite_query(query, memory, settings)
+    normalized = keys.normalize(rr.normalized if rr else query)
+
+    # Tier 1 — exact match. No embed on this path (AC-1/AC-2).
+    payload = await redis_hot.get(
+        keys.exact_key(normalized, prefix=settings.CACHE_KEY_PREFIX), settings=settings
+    )
+    if payload is not None:
+        try:
+            hit = AnswerResponse.model_validate(payload)
+        except ValidationError:
+            hit = None  # redis_hot.get already dropped the corrupt key
+        if hit is not None:
+            ms = int((time.monotonic() - t0) * 1000)
+            return hit, rr, normalized, None, ms
+
+    # Tier 2 — semantic. THE one embed per request (AC-5).
+    query_vec = await retriever_mod.compute_query_vector(normalized, settings)
+    result = await cache_store.lookup(
+        normalized, query_vec, settings=settings, sessionmaker=sessionmaker
+    )
+    ms = int((time.monotonic() - t0) * 1000)
+    if result is not None:
+        hit, cosine = result
+        return hit, rr, normalized, query_vec, ms
+    return None, rr, normalized, query_vec, ms
+
+
+def _log_cache_outcome(hit, tier: str, lookup_ms: int, settings) -> None:
+    """`$ saved` = what the avoided generation would have cost, via F2's central `estimate_cost`
+    (AC-26/AC-27). The cached response carries the token counts it originally cost (AC-27b)."""
+    entries = len(cache_store._CACHE._ids)
+    if hit is None:
+        observability.log_cache(hit=False, tier="miss", lookup_ms=lookup_ms, n_entries=entries)
+        return
+    saved = estimate_cost(settings.LLM_MODEL, hit.tokens_in, hit.tokens_out)
+    observability.log_cache(
+        hit=True, tier=tier, lookup_ms=lookup_ms, n_entries=entries,
+        tokens_saved=hit.tokens_in + hit.tokens_out, est_cost_saved_usd=saved,
+    )
+
+
+def _replay_cached(hit: AnswerResponse, flags: PipelineFlags) -> list[SSEEvent]:
+    """A cache hit's SSE shape (AC-24/AC-25). Reuses the refusal path's terminal shape — skipped
+    stages, then `citations` -> `meta` -> `done` — so F14 renders a hit with no frontend change and
+    the F4 latency suite's stage parser reads it for free.
+
+    The answer is replayed as ONE `token` event carrying the full text, so `astream` and `answer`
+    reassemble byte-identically (the disclaimer is already baked into the cached `answer`).
+    """
+    response = hit.model_copy(update={"cache_hit": True, "pipeline_flags": flags})
+    return [
+        stage_event("searching", "skipped"),
+        stage_event("generating", "skipped"),
+        stage_event("citing", "skipped"),
+        SSEEvent(event="token", data={"token": response.answer}),
+        SSEEvent(event="citations",
+                 data={"citations": [c.model_dump() for c in response.citations]}),
+        SSEEvent(event="meta", data=response.model_dump(exclude={"answer"})),
+        SSEEvent(event="done", data={}),
+    ]
+
+
 async def _pipeline_events(
     query: str,
     k: int,
@@ -100,6 +183,7 @@ async def _pipeline_events(
     memory: MemoryContext | None,
     session,
     settings,
+    sessionmaker=None,
 ) -> AsyncIterator[SSEEvent]:
     """The single source of pipeline truth `astream`/`answer` both consume (AC-19). Emits the
     ordered `stage*` -> `token*` -> `citations` -> `meta` -> `done`|`error` sequence."""
@@ -107,6 +191,24 @@ async def _pipeline_events(
     # F5: reflect the request/eval hybrid toggle onto settings before retrieval, so the F3→F5 seam
     # (`retriever.retrieve`, which reads the mode from settings) honours `flags.hybrid` (AC-12).
     settings = flags_mod.apply_flags(settings, flags)
+
+    # F9: cache lookup, between rewrite and retrieval (CLAUDE.md pipeline order). Everything is
+    # gated on ENABLE_CACHE: flag off emits no `cache_lookup` stage and leaves `rr`/`query_vec`
+    # None, so the path below is byte-for-byte f8-compression-after (AC-30).
+    rr = None
+    query_vec = None
+    if settings.ENABLE_CACHE:
+        sessionmaker = sessionmaker or get_sessionmaker()
+        yield stage_event("cache_lookup", "started")
+        hit, rr, normalized, query_vec, lookup_ms = await _cache_lookup(
+            query, memory, settings, sessionmaker
+        )
+        yield stage_event("cache_lookup", "done", ms=lookup_ms)
+        _log_cache_outcome(hit, "redis" if query_vec is None else "semantic", lookup_ms, settings)
+        if hit is not None:
+            for ev in _replay_cached(hit, flags):
+                yield ev
+            return
 
     t0 = time.monotonic()
     yield stage_event("searching", "started")
@@ -116,8 +218,12 @@ async def _pipeline_events(
         # `retriever.retrieve` (byte-for-byte f6-rerank-after); with it on it rewrites the query
         # via gpt-4o-mini, fans out, union+RRF-merges, and single-reranks. `memory` is threaded
         # through so history-aware condensation activates automatically once F17 populates it.
+        # F9 hands in the `rr` it already computed (no second rewrite) and the `query_vec` it
+        # already embedded (no second embed of the normalized query) — both None when cache is off.
         chunks = await errors_mod.call_with_retry(
-            lambda: rewrite_mod.retrieve(query, k, namespace, settings, memory), settings=settings
+            lambda: rewrite_mod.retrieve(query, k, namespace, settings, memory, rr=rr,
+                                         query_vec=query_vec),
+            settings=settings,
         )
     except Exception as exc:
         # Any unrecoverable retrieval failure (ProviderError after retry exhaustion, or a
@@ -155,6 +261,11 @@ async def _pipeline_events(
             session_id=None,
             memory_summarized=False,
             cache_hit=False,
+            # F9/AC-27b: the prompt tokens the skipped generation WOULD have cost, mirroring the
+            # log_llm_cost call above. Refusals are never cached (AC-16), so this is telemetry
+            # rather than a cache input.
+            tokens_in=would_be_tokens_in,
+            tokens_out=0,
             degraded=degraded,
         )
         yield SSEEvent(event="citations", data={"citations": [c.model_dump() for c in suggestions]})
@@ -222,12 +333,31 @@ async def _pipeline_events(
         session_id=None,
         memory_summarized=False,
         cache_hit=False,
+        # F9/AC-27b: surfaced rather than discarded. These are the counts already computed above
+        # for log_llm_cost; carrying them on the response is what lets a later cache HIT report the
+        # spend it avoided, and what lets the F4 latency suite read `cache_cost_saved_mean` off the
+        # SSE `meta` event with no extra plumbing.
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
         degraded=degraded,
     )
     yield SSEEvent(event="citations",
                    data={"citations": [c.model_dump() for c in resolved_citations]})
     yield SSEEvent(event="meta", data=response.model_dump(exclude={"answer"}))
     yield SSEEvent(event="done", data={})
+
+    # F9 write-behind (AC-14/AC-15): AFTER the terminal `done`, so the cache write can never add
+    # latency to the response — the entire reason this is a task and not an await.
+    #
+    # Only clean answers are cached (AC-16): a refusal is not an answer, a `degraded` answer came
+    # from BM25-only and would be frozen in at full confidence, and a zero-citation answer failed
+    # the post-LLM gate. Caching any of those would preserve a bad answer for 24h.
+    if settings.ENABLE_CACHE and query_vec is not None and not refused and not degraded \
+            and resolved_citations:
+        cache_store.schedule_write(
+            keys.normalize(rr.normalized if rr else query), query_vec, response,
+            settings=settings, sessionmaker=sessionmaker or get_sessionmaker(),
+        )
 
 
 async def astream(
@@ -239,9 +369,13 @@ async def astream(
     *,
     session,
     settings,
+    sessionmaker=None,
 ) -> AsyncIterator[SSEEvent]:
+    """`sessionmaker` is F9's: the cache opens its OWN short-lived sessions for lookup and for the
+    write-behind task, which outlives the request's `session`. Defaults to the app-wide one; tests
+    and the F4 harness inject theirs. Unused when `ENABLE_CACHE` is off."""
     async for ev in _pipeline_events(query, k, namespace, flags or PipelineFlags(), memory,
-                                      session, settings):
+                                      session, settings, sessionmaker):
         yield ev
 
 
@@ -254,13 +388,18 @@ async def answer(
     *,
     session,
     settings,
+    sessionmaker=None,
 ) -> AnswerResponse:
     """Collects `_pipeline_events` into the terminal `meta` event's `AnswerResponse` (AC-20) —
     `answer` text is reassembled from the accumulated `token` events since `meta` omits it (SSE
-    contract: "meta = final AnswerResponse sans answer text")."""
+    contract: "meta = final AnswerResponse sans answer text").
+
+    A cache hit replays its answer as a single `token` event, so this reassembly is byte-identical
+    on hit and miss (AC-25)."""
     full_answer_text = ""
     meta_payload = None
-    async for ev in astream(query, k, namespace, flags, memory, session=session, settings=settings):
+    async for ev in astream(query, k, namespace, flags, memory, session=session, settings=settings,
+                            sessionmaker=sessionmaker):
         if ev.event == "token":
             full_answer_text += ev.data["token"]
         elif ev.event == "meta":

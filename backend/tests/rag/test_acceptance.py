@@ -60,7 +60,9 @@ async def test_smoke_questions_stream_complete_answers_with_at_least_one_citatio
         chunks = await _chunks_for_doc(session, expected_doc_id)
         assert chunks, f"fixture doc {expected_doc_id} has no chunks"
 
-        async def _fake_retrieve(query, k, namespace, settings, _chunks=chunks):
+        # `query_vec` must precede the `_chunks` capture: it is the 5th POSITIONAL arg of the real
+        # seam, so putting it after would bind the caller's query_vec to `_chunks`.
+        async def _fake_retrieve(query, k, namespace, settings, query_vec=None, _chunks=chunks):
             return _chunks
 
         monkeypatch.setattr(retriever, "retrieve", _fake_retrieve)
@@ -98,7 +100,7 @@ async def test_out_of_corpus_probe_triggers_pre_llm_refusal(
     for c in low_score_chunks:
         c.dense_score = 0.01
 
-    async def _fake_low_score_retrieve(query, k, namespace, settings):
+    async def _fake_low_score_retrieve(query, k, namespace, settings, query_vec=None):
         return low_score_chunks
 
     monkeypatch.setattr(retriever, "retrieve", _fake_low_score_retrieve)

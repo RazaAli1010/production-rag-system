@@ -42,7 +42,7 @@ async def test_confirm_true_offloads_and_emits_four_metrics(monkeypatch):
     async def fake_answer(q, k, ns, flags, *, session, settings):
         return AnswerResponse(answer="ans", pipeline_flags=flags)
 
-    async def fake_retrieve(q, k, ns, s):
+    async def fake_retrieve(q, k, ns, s, query_vec=None):
         return [RetrievedChunk(chunk_id="c", doc_id="d1", title="t", text="ctx")]
 
     monkeypatch.setattr(RS, "_build_judge", lambda s: (None, None))

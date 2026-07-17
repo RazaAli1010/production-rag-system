@@ -50,6 +50,10 @@ class CacheEntry(Base):  # AC-3.9
     __tablename__ = "cache_entries"
 
     id: Mapped[UUIDpk]
+    # F9 (migration 0003): sha256 of the normalized query. The upsert key — without it, re-asking a
+    # cached question inserts a duplicate row every time and the in-memory matrix grows unbounded.
+    # Also what `app.caching.run --delete-query` keys on for poison control.
+    query_hash: Mapped[str] = mapped_column(unique=True)
     query_text: Mapped[str]
     embedding: Mapped[bytes] = mapped_column(LargeBinary)  # float32[1536] ~= 6 KB
     answer: Mapped[JSONBDict]  # serialized AnswerResponse

@@ -276,6 +276,80 @@ jobs:
           fi
           ruff check app/rag
 
+  caching:
+    name: F9 semantic cache — tier tests, adversarial calibration, async guard
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+      OPENAI_API_KEY: sk-ci-only-placeholder
+      PINECONE_API_KEY: pc-ci-only-placeholder
+      PINECONE_INDEX: campus-rag-ci
+      # REDIS_URL deliberately unset — the hot tier is optional (redis_hot short-circuits to a miss
+      # when it is None), and every test injects a fake Redis client, so CI needs no Redis service.
+      # That is a property of the fail-open design, not a gap in the tests: `test_redis_hot.py`
+      # covers the down/hanging/corrupt paths explicitly.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Cache tests (Redis and OpenAI are injected fakes; the adversarial calibration runs
+          offline against committed text-embedding-3-small vectors, so no network calls to real
+          providers occur in this suite)
+        working-directory: backend
+        run: pytest tests/cache -v
+
+      - name: Async-guard (no sync embed_query/invoke, blocking requests, sync redis in
+          app/caching — this is the one module that talks to Redis, so the guard matters most here)
+        working-directory: backend
+        run: |
+          set -e
+          if grep -RnE "\.embed_documents\(|\.embed_query\(|import requests\b|from redis import(?!\.asyncio)|^\s*import redis$" app/caching; then
+            echo "Sync embedding call / blocking requests / sync redis import found in app/caching — forbidden by the async-everywhere rule (use 'import redis.asyncio as redis')." >&2
+            exit 1
+          fi
+          if grep -RnE "\.invoke\(" app/caching --include="*.py"; then
+            echo "Sync .invoke() call found in app/caching — use .ainvoke() instead." >&2
+            exit 1
+          fi
+          if grep -RnE "create_engine\(" app/caching; then
+            echo "Sync create_engine() found in app/caching — use create_async_engine instead." >&2
+            exit 1
+          fi
+          ruff check app/caching
+
   evals:
     name: F4 evaluation harness — suite tests, async guard
     runs-on: ubuntu-latest

@@ -209,19 +209,25 @@ def rrf_merge(pools: list[list[RetrievedChunk]], settings) -> list[RetrievedChun
 
 
 async def multi_query_retrieve(
-    rr: RewriteResult, k: int, namespace: str | None, settings
+    rr: RewriteResult, k: int, namespace: str | None, settings,
+    query_vec: list[float] | None = None,
 ) -> list[RetrievedChunk]:
     """Fan out F5 hybrid retrieval over `rr.fanout_queries()` bounded by
     `Semaphore(REWRITE_FANOUT_CONCURRENCY)` (AC-5), union + RRF-merge the pools (AC-6), then a
     SINGLE F6 rerank of the merged pool against the NORMALIZED query when `ENABLE_RERANK` is on
     (AC-7), else truncate to `k`. Each fan-out call reuses `retriever.gather_candidate_pool`, which
-    applies the F6 pool-widening internally, so fan-out and the single-query seam share one path."""
+    applies the F6 pool-widening internally, so fan-out and the single-query seam share one path.
+
+    F9: `query_vec` is the embedding of `rr.normalized` that the cache seam already computed. It is
+    applied to THAT fan-out query only — the paraphrase variants are different strings and must
+    embed themselves, so passing their vector along would retrieve the wrong neighbourhood."""
     queries = rr.fanout_queries()
     sem = asyncio.Semaphore(settings.REWRITE_FANOUT_CONCURRENCY)
 
     async def _gather_one(q: str) -> list[RetrievedChunk]:
         async with sem:
-            return await retriever_mod.gather_candidate_pool(q, k, namespace, settings)
+            vec = query_vec if q == rr.normalized else None
+            return await retriever_mod.gather_candidate_pool(q, k, namespace, settings, vec)
 
     pools = await asyncio.gather(*(_gather_one(q) for q in queries))
     merged = rrf_merge(pools, settings)
@@ -236,20 +242,27 @@ async def multi_query_retrieve(
 # --------------------------------------------------------------------------- seam wrapper (T9)
 
 async def retrieve(
-    query: str, k: int, namespace: str | None, settings, memory: MemoryContext | None = None
+    query: str, k: int, namespace: str | None, settings, memory: MemoryContext | None = None,
+    rr: RewriteResult | None = None, query_vec: list[float] | None = None,
 ) -> list[RetrievedChunk]:
     """The NEW outer retrieval seam (AC-15/AC-17). When `ENABLE_QUERY_REWRITE` is off, delegate
     VERBATIM to `retriever.retrieve` (byte-for-byte `f6-rerank-after`) and clear the out-of-band
     result. When on, run the rewrite, stash the `RewriteResult` for `last_rewrite()`, and fan out.
     Called by `_pipeline_events` (with the pipeline's `memory`) and the F4 retrieval suite (memory
-    None); the off-path delegation keeps every prior label's numbers unchanged."""
+    None); the off-path delegation keeps every prior label's numbers unchanged.
+
+    F9 (AC-12): `rr` lets the caller hand in a `RewriteResult` it already computed. The cache seam
+    must rewrite BEFORE it can build a cache key (the key is F7's standalone question), so without
+    this the pipeline would pay for a second gpt-4o-mini rewrite on every miss. This is the reuse
+    this module's docstring was decomposed for. `query_vec` is threaded the same way — see
+    `multi_query_retrieve`."""
     if not settings.ENABLE_QUERY_REWRITE:
         _REWRITE_RESULT.set(None)
-        return await retriever_mod.retrieve(query, k, namespace, settings)
+        return await retriever_mod.retrieve(query, k, namespace, settings, query_vec)
 
-    rr = await rewrite_query(query, memory, settings)
+    rr = rr if rr is not None else await rewrite_query(query, memory, settings)
     _REWRITE_RESULT.set(rr)
-    return await multi_query_retrieve(rr, k, namespace, settings)
+    return await multi_query_retrieve(rr, k, namespace, settings, query_vec)
 
 
 def last_rewrite() -> RewriteResult | None:

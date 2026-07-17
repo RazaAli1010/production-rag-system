@@ -227,7 +227,7 @@ async def test_mid_stream_failure_yields_terminal_error_event(monkeypatch, sessi
 async def test_query_truncated_before_retrieval(monkeypatch, session):
     seen_queries = []
 
-    async def _spy_retrieve(query, k, namespace, settings):
+    async def _spy_retrieve(query, k, namespace, settings, query_vec=None):
         seen_queries.append(query)
         return [_retrieved_chunk(0.9)]
 

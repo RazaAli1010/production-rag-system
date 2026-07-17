@@ -72,6 +72,28 @@ def log_compression(
                 compression_ms=compression_ms)
 
 
+def log_cache(
+    hit: bool,
+    tier: str,
+    lookup_ms: int,
+    n_entries: int,
+    cosine: float | None = None,
+    tokens_saved: int = 0,
+    est_cost_saved_usd: float = 0.0,
+) -> None:
+    """F9: record the semantic-cache metrics (AC-26). `tier` is `redis` | `semantic` | `miss`.
+
+    The cache adds no OpenAI call — it REMOVES them — so there is no `estimate_cost` site here:
+    `est_cost_saved_usd` is computed by the caller via F2's central `estimate_cost` over the cached
+    response's `tokens_in`/`tokens_out` (AC-27), i.e. the spend this hit avoided. Synchronous +
+    non-blocking (a structlog emit over a handful of values), mirroring `log_rerank`/`log_rewrite`/
+    `log_compression`; F13 later routes it into `request_logs`/Langfuse (the `cache_hit` and
+    `embed_ms` columns already exist) without an F9 change."""
+    logger.info("rag.cache", cache_hit=hit, tier=tier, lookup_ms=lookup_ms,
+                n_entries=n_entries, cosine=cosine, tokens_saved=tokens_saved,
+                est_cost_saved_usd=est_cost_saved_usd)
+
+
 def log_rerank(rerank_ms: int, max_score: float, n_candidates: int) -> None:
     """F6: record the cross-encoder rerank metrics (AC-20). Reranking adds no OpenAI call — the
     cross-encoder is free/in-process — so there is no `estimate_cost` site here; the only new

@@ -4,6 +4,7 @@ import struct
 import uuid
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.db.enums import RequestChannel
 from app.db.models import CacheEntry, RequestLog
@@ -53,6 +54,7 @@ async def test_cache_entry_embedding_round_trip(session):
     assert len(raw) == 1536 * 4
 
     entry = CacheEntry(
+        query_hash="a" * 64,
         query_text="probation se kaise nikalta hoon",
         embedding=raw,
         answer={"answer": "...", "citations": []},
@@ -64,3 +66,20 @@ async def test_cache_entry_embedding_round_trip(session):
 
     fetched = await session.get(CacheEntry, entry.id)
     assert fetched.embedding == raw  # byte-identical
+
+
+@pytest.mark.asyncio
+async def test_cache_entry_query_hash_is_unique(session):
+    """F9 (0003): the upsert key. Without the unique constraint, every repeat ask of a cached
+    question would insert a duplicate row and grow F9's brute-force matrix without bound."""
+    raw = struct.pack("<4f", 1.0, 0.0, 0.0, 0.0)
+    shared_hash = "b" * 64
+
+    session.add(CacheEntry(query_hash=shared_hash, query_text="q1", embedding=raw,
+                           answer={}, index_manifest_id="m1", hits=0))
+    await session.flush()
+
+    session.add(CacheEntry(query_hash=shared_hash, query_text="q2", embedding=raw,
+                           answer={}, index_manifest_id="m1", hits=0))
+    with pytest.raises(IntegrityError):
+        await session.flush()
