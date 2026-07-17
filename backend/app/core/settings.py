@@ -240,5 +240,23 @@ class Settings(BaseSettings):
     EVAL_QUOTA_CODE_SWITCHED: int = 15  # AC-3
     EVAL_QUOTA_OUT_OF_CORPUS: int = 10  # AC-3
 
+    # --- Auth (F10) ---
+    JWT_SECRET: SecretStr  # required, no default
+    JWT_ALGORITHM: str = "HS256"
+    JWT_LEEWAY_S: int = 30  # clock skew, exp only
+    ACCESS_TOKEN_TTL_MIN: int = 15
+    REFRESH_TOKEN_TTL_DAYS: int = 7
+    BCRYPT_ROUNDS: int = 12
+    AUTH_EMAIL_DOMAIN_ALLOWLIST: list[str] = []  # empty => any domain
+    # Keyed on email, not IP: IP-keying lets one hostile client lock out every account behind a
+    # university/carrier NAT.
+    LOGIN_MAX_FAILURES: int = 10
+    LOGIN_LOCKOUT_WINDOW_MIN: int = 15
+    # Resolved here by rate_tier(); enforced by F11.
+    RATE_LIMIT_ANON_PER_MIN: int = 5
+    RATE_LIMIT_STUDENT_PER_MIN: int = 20
+    RATE_LIMIT_ADMIN_PER_MIN: int = 60
+    RATE_LIMIT_API_KEY_PER_MIN: int = 30
+
 
 settings = Settings()

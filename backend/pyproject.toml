@@ -71,6 +71,15 @@ dependencies = [
     # `app/` (it arrived transitively via torch/pandas/ragas until now), so it gets pinned here
     # rather than relied on as someone else's transitive dep.
     "numpy==2.4.6",
+    # --- Auth (F10) ---
+    # passlib[bcrypt]==1.7.4 + bcrypt==4.0.1 are already pinned above (F12) and reused as-is. That
+    # bcrypt pin is load-bearing: passlib reads `bcrypt.__about__.__version__`, which bcrypt>=4.1
+    # removed, and the failure surfaces as a bogus "password cannot be longer than 72 bytes" on
+    # every hash call.
+    "pyjwt==2.10.1",
+    # Required by OAuth2PasswordRequestForm — FastAPI parses the password grant as form data, and
+    # without this /token raises at import rather than failing cleanly.
+    "python-multipart==0.0.20",
 ]
 
 [project.optional-dependencies]
