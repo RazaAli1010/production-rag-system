@@ -177,8 +177,12 @@ start appearing quickly and the page to stay usable.
 ### 3.4 Refusal and failure states
 
 - **AC-24** WHEN `meta.refused` is `true`, THE SYSTEM SHALL render the turn in the refusal state —
-  visually distinct from both a normal answer and an error — showing `refusal_reason` and any
-  citations returned as "you might check" suggestions.
+  visually distinct from both a normal answer and an error — showing student-facing copy mapped
+  from `refusal_reason` and any citations returned as "you might check" suggestions.
+  **`refusal_reason` is a machine token, not prose.** Confirmed against a live run: the wire values
+  are `low_retrieval_confidence` (`baseline.py:260`) and `no_grounded_claims` (`baseline.py:334`,
+  `refusal.py:57`). THE SYSTEM SHALL NOT render the raw token, and SHALL fall back to generic copy
+  for an unrecognised one.
 - **AC-25** WHEN a response is `429`, THE SYSTEM SHALL read `Retry-After`, disable the composer, and
   count down in place, re-enabling at zero.
 - **AC-26** WHEN a response is `503` or a terminal SSE `error` event arrives, THE SYSTEM SHALL keep
@@ -191,6 +195,9 @@ start appearing quickly and the page to stay usable.
   re-enable — it SHALL NOT surface this as an error.
 - **AC-29** IF `GET /api/health` reports any dependency unhealthy at load, THEN THE SYSTEM SHALL show
   a dismissible banner naming the degradation; it SHALL NOT block asking.
+  **The endpoint answers HTTP 503 when degraded**, with the detail in the body — so the client SHALL
+  read the body of a failed response rather than discarding it on `!res.ok`. A dependency reported
+  as `skipped` (an unconfigured Redis is a valid deployment) SHALL NOT count as degraded.
 - **AC-30** THE SYSTEM SHALL parse both error body shapes (§1.5) and SHALL never render a raw JSON
   blob to the user.
 
@@ -327,3 +334,11 @@ All of §3 pass, §7 suites are green in CI, and the app builds and runs against
 6. **`flags_override`.** Admin-only server-side; never sent by this client.
 7. **`GET /api/history`.** Superseded by the session list per the brief. Not consumed.
 8. **LangGraph / LlamaIndex.** v2 stretch, untouched.
+9. **`MEMORY_ANON_MAX_MESSAGES` is dead config.** Declared at `settings.py:199` (default 30) but
+   referenced nowhere in `backend/app/`, so no anonymous message cap is actually enforced. F14
+   builds no UI state for it. Either wire it up backend-side or delete it — not an F14 decision.
+10. **`AnswerResponse` / `Citation` / `StageEvent` are absent from `/openapi.json`.** `/api/ask`
+    declares no `response_model` (it returns a `StreamingResponse`), and OpenAPI cannot describe an
+    event stream in any case. The SSE payload types are therefore hand-written in
+    `frontend/src/api/types.ts` against `app/core/contracts.py`; only the REST shapes are generated.
+    Verified field-for-field against a live `meta` frame.

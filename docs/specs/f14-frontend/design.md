@@ -328,7 +328,7 @@ event error / stream ends w/o done   ─► status interrupted, partial answer k
 | 404 on session | status | drop the stale id, start a new session | AC-22 |
 | `meta.refused` | payload, not status | RefusalCard + suggestions | AC-24 |
 | `meta.degraded` | payload | inline "keyword index only" note | AC-9 |
-| health degraded | `/api/health` | dismissible banner, never blocking | AC-29 |
+| health degraded | `/api/health` **503 body** | dismissible banner, never blocking | AC-29 |
 
 The load-bearing distinction: **refusal is not an error and a 409 is not an error.** Both are
 ordinary states of a working system, and rendering either in the error style would teach students to

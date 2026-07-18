@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+# Build-mode config, not a secret: `vite build --mode mock` reads it to produce the MSW-backed
+# bundle the Lighthouse gate runs against.
+!frontend/.env.mock
 
 # --- Python (backend) ---
 __pycache__/

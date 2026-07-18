@@ -1,0 +1,105 @@
+name: Frontend
+
+# A separate workflow rather than a job inside ci.yml: GitHub Actions supports `paths:` filters only
+# at the workflow level, never per job. The F14 frontend needs neither Python nor Postgres, so
+# running it on a backend-only PR would burn a runner rebuilding an unchanged bundle. The nine
+# Python jobs in ci.yml stay unfiltered and keep running on every PR.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+
+jobs:
+  frontend:
+    name: F14 frontend — lint, typecheck, tests, build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests — unit, component, MSW stream fixtures, axe
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      # NFR-2: a Latin-only session must not exceed 120KB of fonts. Nastaliq (~160KB) is excluded
+      # because @fontsource's `unicode-range` means the browser never requests it unless
+      # Arabic-script glyphs are actually rendered.
+      - name: Font budget
+        run: |
+          set -e
+          TOTAL=0
+          for f in dist/assets/*.woff2; do
+            case "$f" in *nastaliq*) continue;; esac
+            TOTAL=$((TOTAL + $(wc -c < "$f")))
+          done
+          echo "Latin woff2 total: $((TOTAL / 1024))KB"
+          if [ "$TOTAL" -gt 122880 ]; then
+            echo "Latin font payload over the 120KB budget (NFR-2)." >&2
+            exit 1
+          fi
+
+      # The allowlist markdown renderer is what makes the localStorage refresh-token tradeoff
+      # defensible (docs/specs/f14-frontend/requirements.md §4). Enforced here as well as in eslint
+      # so it cannot be disabled with an inline comment.
+      - name: No raw HTML guard
+        run: |
+          set -e
+          if grep -RnE "dangerouslySetInnerHTML" src; then
+            echo "dangerouslySetInnerHTML found — answers must render through the allowlist." >&2
+            exit 1
+          fi
+
+  lighthouse:
+    name: F14 frontend — Lighthouse mobile (perf ≥85, a11y ≥90)
+    runs-on: ubuntu-latest
+    needs: frontend
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # Built against the MSW service worker so the audit needs no backend, no OpenAI key and no
+      # seeded corpus — the numbers measure the frontend, which is what the gate is about.
+      - name: Build with mocks
+        run: npm run build:mock
+
+      - name: Lighthouse CI
+        run: npx --yes @lhci/cli@0.14.x autorun
