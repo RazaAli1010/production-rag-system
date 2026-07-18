@@ -93,7 +93,30 @@ class StructureChunker:
                 fallback = _Section(last.heading, last.anchor, last.page_start, last.page_end)
                 fallback.parts = list(carry)
                 merged.append(fallback)
-        return merged
+        return self._pack(merged)
+
+    def _pack(self, sections):
+        """Greedily fill consecutive sections up to a chunk budget.
+
+        The extractor emits one block per line, so most sections are a clause or a table-of-
+        contents entry — far too small to retrieve on alone (median 16 tokens unpacked). Packing
+        them into ~1000-token passages is what makes a single retrieved chunk carry a whole rule.
+
+        ponytail: the packed chunk keeps the FIRST section's heading, so a chunk spanning a
+        section boundary can cite a heading its tail text sits under. The page range still spans
+        correctly. Split on heading change instead if citation headings need to be exact.
+        """
+        packed = []
+        for sec in sections:
+            prev = packed[-1] if packed else None
+            if prev and count_tokens(prev.text) + count_tokens(sec.text) <= self.settings.FIXED_CHUNK_TOKENS:
+                prev.parts = prev.parts + sec.parts
+                prev.page_end = sec.page_end
+                prev.heading = prev.heading or sec.heading
+                prev.anchor = prev.anchor or sec.anchor
+                continue
+            packed.append(sec)
+        return packed
 
     def _emit(self, sections, doc_id):
         chunks = []

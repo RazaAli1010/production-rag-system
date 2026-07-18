@@ -23,8 +23,8 @@ def test_settings_defaults_load():
     assert s.EMBED_DIM == 1536
     assert s.EMBED_BATCH_SIZE == 100
     assert s.EMBED_CONCURRENCY == 4
-    assert s.FIXED_CHUNK_TOKENS == 500
-    assert s.FIXED_CHUNK_OVERLAP == 50
+    assert s.FIXED_CHUNK_TOKENS == 1000
+    assert s.FIXED_CHUNK_OVERLAP == 200
     assert s.STRUCTURE_MAX_SECTION_TOKENS == 800
     assert s.PINECONE_METADATA_MAX_BYTES == 40_000
     assert s.OPENAI_API_KEY.get_secret_value() == "sk-test"

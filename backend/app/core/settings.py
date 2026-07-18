@@ -68,9 +68,9 @@ class Settings(BaseSettings):
     PINECONE_UPSERT_CONCURRENCY: int = 4
     PINECONE_METADATA_MAX_BYTES: int = 40_000
 
-    INDEXING_STRATEGY: Literal["fixed", "structure"] = "fixed"
-    FIXED_CHUNK_TOKENS: int = 500
-    FIXED_CHUNK_OVERLAP: int = 50
+    INDEXING_STRATEGY: Literal["fixed", "structure"] = "structure"
+    FIXED_CHUNK_TOKENS: int = 1000
+    FIXED_CHUNK_OVERLAP: int = 200
     STRUCTURE_MAX_SECTION_TOKENS: int = 800
     STRUCTURE_CLAUSE_PATTERNS: list[str] = [
         r"^\d+(\.\d+)*[.)]\s", r"^[A-Z][A-Z \-]{6,}$", r"Regulation No\.",

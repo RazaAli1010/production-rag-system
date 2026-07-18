@@ -22,14 +22,14 @@ export interface Flags {
 /**
  * These are UI defaults, NOT a mirror of the backend `.env`: once the user picks, the server's
  * `ENABLE_*` values only supply the starting point for callers that send no override at all.
- * `query_rewrite` and `cache` start off because both regressed on their eval gate —
- * see docs/eval_results (rewrite hurt headline hit@5; the cache never hits code-switched queries).
+ * A fresh conversation starts with `memory` as the only enabled stage — every retrieval
+ * enhancement is opt-in, so the baseline pipeline is what a new user sees first.
  */
 export const DEFAULT_FLAGS: Flags = {
-  hybrid: true,
-  rerank: true,
+  hybrid: false,
+  rerank: false,
   query_rewrite: false,
-  compression: true,
+  compression: false,
   cache: false,
   memory: true,
   deep: false,
