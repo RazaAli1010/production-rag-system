@@ -107,7 +107,10 @@ async def test_cache_off_is_byte_for_byte_the_f8_path(pipeline, session, session
 
     stages = [e.data["stage"] for e in events if e.event == "stage"]
     assert "cache_lookup" not in stages
-    assert stages == ["searching", "searching", "generating", "generating", "citing", "citing"]
+    # rewriting/reranking/compressing each emit a single `skipped` frame when their flag is off,
+    # so a disabled layer is visible in the UI as deliberately-not-run rather than absent.
+    assert stages == ["rewriting", "searching", "searching", "reranking", "compressing",
+                      "generating", "generating", "citing", "citing"]
     assert pipeline["embeds"] == 0, "cache off must not add an embed to the request path"
     async with sessionmaker_() as s:
         assert await s.scalar(select(func.count()).select_from(CacheEntry)) == 0
@@ -156,11 +159,14 @@ async def test_hit_event_shape(pipeline, session, sessionmaker_, cache_settings)
     events = await _ask("how do i get off probation", cache_settings, session, sessionmaker_)
 
     kinds = [e.event for e in events]
-    assert kinds == ["stage", "stage", "stage", "stage", "stage", "token", "citations", "meta",
-                     "done"]
+    assert kinds == ["stage"] * 7 + ["token", "citations", "meta", "done"]
     stages = [(e.data["stage"], e.data["status"]) for e in events if e.event == "stage"]
+    # The replay marks every pipeline layer skipped, including the two F6/F8 stages added later —
+    # a hit still needs no new event TYPE, which is what AC-24 actually pins.
     assert stages == [("cache_lookup", "started"), ("cache_lookup", "done"),
-                      ("searching", "skipped"), ("generating", "skipped"), ("citing", "skipped")]
+                      ("searching", "skipped"), ("reranking", "skipped"),
+                      ("compressing", "skipped"), ("generating", "skipped"),
+                      ("citing", "skipped")]
     assert next(e for e in events if e.event == "citations").data["citations"]
 
 

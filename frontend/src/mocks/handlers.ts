@@ -34,6 +34,10 @@ function streamFrames(payload: string): ReadableStream<Uint8Array> {
 }
 
 const SESSION_ID = "11111111-1111-1111-1111-111111111111";
+/** A session that exists but holds no messages — what an empty "Untitled chat" row opens to. */
+export const EMPTY_SESSION_ID = "22222222-2222-2222-2222-222222222222";
+/** Listed but 404s on fetch (deleted in another tab, or not owned by this caller). */
+export const MISSING_SESSION_ID = "33333333-3333-3333-3333-333333333333";
 
 export const handlers = [
   http.post("/api/ask", async ({ request }) => {
@@ -90,17 +94,30 @@ export const handlers = [
         last_active_at: "2026-07-17T18:20:00Z",
       },
       {
-        id: "22222222-2222-2222-2222-222222222222",
+        id: EMPTY_SESSION_ID,
         title: null,
         total_tokens: 900,
         created_at: "2026-07-02T11:00:00Z",
         last_active_at: "2026-07-02T11:40:00Z",
       },
+      {
+        id: MISSING_SESSION_ID,
+        title: "Deleted elsewhere",
+        total_tokens: 100,
+        created_at: "2026-07-01T09:00:00Z",
+        last_active_at: "2026-07-01T09:10:00Z",
+      },
     ]),
   ),
 
-  http.get("/api/sessions/:id/messages", () =>
-    HttpResponse.json([
+  // Keyed on :id. It used to return the same populated transcript for EVERY id, which made the
+  // empty-session and 404 paths untestable — the exact bug class that shipped.
+  http.get("/api/sessions/:id/messages", ({ params }) => {
+    if (params.id === EMPTY_SESSION_ID) return HttpResponse.json([]);
+    if (params.id === MISSING_SESSION_ID) {
+      return HttpResponse.json({ detail: "Session not found" }, { status: 404 });
+    }
+    return HttpResponse.json([
       {
         id: "aaaa1111-0000-0000-0000-000000000001",
         role: "user",
@@ -128,8 +145,8 @@ export const handlers = [
         ],
         created_at: "2026-07-17T18:19:06Z",
       },
-    ]),
-  ),
+    ]);
+  }),
 
   http.delete("/api/sessions/:id", () => new HttpResponse(null, { status: 204 })),
 

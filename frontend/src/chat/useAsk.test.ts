@@ -2,7 +2,7 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { useAsk } from "./useAsk";
+import { __test, useAsk } from "./useAsk";
 
 const SESSION = "11111111-1111-1111-1111-111111111111";
 
@@ -33,13 +33,37 @@ describe("useAsk", () => {
     expect(turn.stages.find((s) => s.stage === "rewriting")?.status).toBe("skipped");
   });
 
-  it("collapses the trail once the first token lands, and ends done", async () => {
+  it("collapses the trail once the turn settles, and ends done", async () => {
     const { result } = await askOnce("__happy probation");
     const turn = result.current.turns[0]!;
     expect(turn.trailCollapsed).toBe(true);
     expect(turn.status).toBe("done");
     expect(turn.answer).toContain("probation");
     expect(turn.citations).toHaveLength(1);
+  });
+
+  it("keeps the trail live while tokens stream, so late stages stay visible", () => {
+    // `citing` is emitted AFTER generation, so a trail that collapsed on the first token would
+    // never show it. Drive the reducer directly — the ordering is the whole point.
+    const { reducer } = __test;
+    let s = reducer({ turns: [], busyUntil: null, busyReason: null }, {
+      t: "start",
+      id: "t1",
+      question: "q",
+    });
+    s = reducer(s, { t: "token", id: "t1", token: "partial " });
+    expect(s.turns[0]!.trailCollapsed).toBe(false);
+
+    s = reducer(s, {
+      t: "stage",
+      id: "t1",
+      stage: { stage: "citing", status: "started", ms: null },
+    });
+    expect(s.turns[0]!.trailCollapsed).toBe(false);
+    expect(s.turns[0]!.stages.map((x) => x.stage)).toContain("citing");
+
+    s = reducer(s, { t: "settle", id: "t1", status: "done" });
+    expect(s.turns[0]!.trailCollapsed).toBe(true);
   });
 
   it("ends a refusal as `refused`, never as an error", async () => {

@@ -6,7 +6,11 @@ import { StreamErrorCard } from "./StreamErrorCard";
 import type { Turn } from "./types";
 
 /**
- * T8 — one exchange: the question right, the answer left.
+ * T8 — one exchange, set as a register entry: the query line, then the ruling beneath it.
+ *
+ * Deliberately NOT a chat bubble pair. This is a reference tool where the answer is the artifact
+ * and the question is its heading, so the question is a full-width line in the condensed display
+ * face and the answer gets the body width, the raised stock, and the seal rule down its edge.
  *
  * `dir="auto"` on every message body is what makes a mixed Urdu/Latin thread render correctly —
  * direction resolves per element from its first strong character, so a Roman-Urdu question and an
@@ -25,15 +29,21 @@ export function Message({
   const showTrail = streaming && !turn.trailCollapsed;
 
   return (
-    <article className="mb-8">
-      <div className="mb-3 flex justify-end">
-        <p
+    <article className="mb-12">
+      <header className="mb-4">
+        <p className="mb-1 font-mono text-xs uppercase tracking-[0.14em] text-ink-muted">
+          Asked
+          {turn.namespace && (
+            <span className="ml-2 text-seal">{turn.namespace.toUpperCase()} only</span>
+          )}
+        </p>
+        <h2
           dir="auto"
-          className="max-w-[85%] rounded bg-ink px-3 py-2 text-sm text-paper font-urdu-fallback"
+          className="font-display text-lg font-bold leading-snug text-ink font-urdu-fallback"
         >
           {turn.question}
-        </p>
-      </div>
+        </h2>
+      </header>
 
       <div className="max-w-thread">
         {showTrail && <StampTrail stages={turn.stages} />}
@@ -44,7 +54,7 @@ export function Message({
         {turn.status === "refused" ? (
           <RefusalCard reason={turn.meta?.refusal_reason ?? null} suggestions={turn.citations} />
         ) : (
-          <div className="rounded bg-paper-raised px-4 py-3">
+          <div className="rounded border-l-2 border-seal bg-paper-raised px-5 py-4">
             {/* The streaming answer. Polite, and separate from the trail's region so a stage
                 change never re-announces the whole growing answer (AC-40). */}
             <div

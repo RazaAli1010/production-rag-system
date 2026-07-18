@@ -47,17 +47,24 @@ export function Composer({ onAsk, disabled, lockNote, initialValue = "" }: Props
   return (
     <div className="border-t border-rule bg-paper px-4 pb-3 pt-2">
       <div className="mx-auto max-w-thread">
-        <div className="mb-2 flex gap-1.5" role="group" aria-label="Limit to a source">
+        {/* Scope is a refinement, not the main event: it sits as a quiet mono row above the field
+            so the send affordance keeps the weight. */}
+        <div
+          className="mb-2 flex items-baseline gap-3 font-mono text-xs"
+          role="group"
+          aria-label="Limit to a source"
+        >
+          <span className="uppercase tracking-[0.14em] text-ink-muted">Search</span>
           {CHIPS.map((c) => (
             <button
               key={c.id}
               type="button"
               onClick={() => setNs(c.id)}
               aria-pressed={ns === c.id}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              className={`border-b transition-colors ${
                 ns === c.id
-                  ? "border-seal bg-seal text-white"
-                  : "border-rule text-ink-muted hover:border-ink-muted"
+                  ? "border-seal font-medium text-seal"
+                  : "border-transparent text-ink-muted hover:text-ink"
               }`}
             >
               {c.label}
@@ -90,7 +97,8 @@ export function Composer({ onAsk, disabled, lockNote, initialValue = "" }: Props
             type="button"
             onClick={submit}
             disabled={!canSend}
-            className="rounded bg-seal px-4 py-2 text-sm font-medium text-white
+            className="shrink-0 rounded bg-seal px-6 py-2.5 text-sm font-semibold text-white
+                       transition-opacity hover:opacity-90
                        disabled:cursor-not-allowed disabled:opacity-40"
           >
             Ask
@@ -109,10 +117,7 @@ export function Composer({ onAsk, disabled, lockNote, initialValue = "" }: Props
               </span>
             )}
           </p>
-          <p className="text-right text-xs text-ink-muted">
-            Answers come from PU and HEC documents and always cite them. Check the cited page before
-            you act on it.
-          </p>
+          <p className="text-right text-xs text-ink-muted">Check the cited page before you act.</p>
         </div>
       </div>
     </div>

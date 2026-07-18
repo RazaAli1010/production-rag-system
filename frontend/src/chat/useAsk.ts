@@ -3,7 +3,9 @@
  *
  * Every rule here falls straight out of the wire contract:
  *  - a `done` stage MERGES onto its `started` entry, so the trail shows five stages, not ten;
- *  - the first token collapses the trail into the receipt chip;
+ *  - the trail stays live until the turn SETTLES, then collapses into the receipt chip — stages
+ *    interleave with tokens (`citing` arrives after generation), so collapsing on the first token
+ *    would hide the back half of the pipeline;
  *  - `meta.refused` ends the turn as `refused`, never as an error;
  *  - a stream that ends without `done`, and a terminal `error` event, are ONE code path —
  *    to the client a server timeout and a dropped 3G connection are indistinguishable, and both
@@ -77,11 +79,7 @@ function reducer(state: State, a: Action): State {
     case "stage":
       return patch(state, a.id, (t) => ({ ...t, stages: mergeStage(t.stages, a.stage) }));
     case "token":
-      return patch(state, a.id, (t) => ({
-        ...t,
-        answer: t.answer + a.token,
-        trailCollapsed: true, // AC-5: the first token is what collapses the trail
-      }));
+      return patch(state, a.id, (t) => ({ ...t, answer: t.answer + a.token }));
     case "citations":
       return patch(state, a.id, (t) => ({ ...t, citations: a.citations }));
     case "meta":
@@ -91,7 +89,15 @@ function reducer(state: State, a: Action): State {
         citations: a.meta.citations.length ? a.meta.citations : t.citations,
       }));
     case "settle":
-      return patch(state, a.id, (t) => ({ ...t, status: a.status, error: a.error }));
+      // The turn ending is what collapses the trail into the receipt chip. It used to be the first
+      // token, which hid every stage emitted during/after generation (`citing`, and the `generating`
+      // done frame) — the user never saw the pipeline finish.
+      return patch(state, a.id, (t) => ({
+        ...t,
+        status: a.status,
+        error: a.error,
+        trailCollapsed: true,
+      }));
     case "fail":
       // Pre-stream failure: no partial answer exists, so the turn carries only the error.
       return patch(state, a.id, (t) => ({ ...t, status: "failed", error: a.error }));
@@ -125,7 +131,16 @@ export function useAsk(sessionId: string | null) {
   const abortRef = useRef<AbortController | null>(null);
 
   const run = useCallback(
-    async (turnId: string, question: string, namespace?: "pu" | "hec") => {
+    async (
+      turnId: string,
+      question: string,
+      namespace?: "pu" | "hec",
+      // Sessions are now created lazily on the first ask, so the caller resolves the id and passes
+      // it in — the `sessionId` prop below is still the previous render's value at that moment and
+      // would post the first question with `session_id: null`.
+      sessionIdOverride?: string,
+    ) => {
+      const activeSessionId = sessionIdOverride ?? sessionId;
       dispatch({ t: "start", id: turnId, question, namespace });
       abortRef.current?.abort();
       const ctrl = new AbortController();
@@ -136,7 +151,7 @@ export function useAsk(sessionId: string | null) {
       let refused = false;
       try {
         for await (const ev of askStream(
-          { question, session_id: sessionId, namespace: namespace ?? null } as never,
+          { question, session_id: activeSessionId, namespace: namespace ?? null } as never,
           { signal: ctrl.signal },
         )) {
           switch (ev.event) {
@@ -208,8 +223,13 @@ export function useAsk(sessionId: string | null) {
   );
 
   const ask = useCallback(
-    (question: string, namespace?: "pu" | "hec") =>
-      run(`turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, question, namespace),
+    (question: string, namespace?: "pu" | "hec", sessionIdOverride?: string) =>
+      run(
+        `turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        question,
+        namespace,
+        sessionIdOverride,
+      ),
     [run],
   );
 

@@ -5,9 +5,9 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 import app.db.models.corpus as corpus
-from app.core.contracts import RetrievedChunk
+from app.core.contracts import PipelineFlags, RetrievedChunk
 from app.core.settings import Settings
-from app.rag import baseline, errors, retriever
+from app.rag import baseline, errors, rerank, retriever
 
 FULL_ANSWER = "According to policy [1], students must comply."
 
@@ -125,7 +125,12 @@ async def test_astream_happy_path_event_order_and_content(monkeypatch, session):
     kinds = [e.event for e in events]
 
     assert kinds[0] == "stage"
-    assert events[0].data == {"stage": "searching", "status": "started", "ms": None}
+    # Stages lead the stream; `searching` is no longer index 0 (a `rewriting` frame precedes it),
+    # so match by stage name rather than position.
+    assert {"stage": "searching", "status": "started", "ms": None} in [
+        e.data for e in events if e.event == "stage"
+    ]
+    assert kinds.index("stage") < kinds.index("token")
     assert kinds[-1] == "done"
     assert kinds[-2] == "meta"
     assert kinds[-3] == "citations"
@@ -241,6 +246,94 @@ async def test_query_truncated_before_retrieval(monkeypatch, session):
 
     assert seen_queries[0] != long_query
     assert len(baseline._ENC.encode(seen_queries[0])) <= 5
+
+
+def _flags(**o):
+    """Mirror `ask._effective_flags`: `apply_flags` overlays PipelineFlags onto settings, and
+    PipelineFlags defaults are all-False, so a direct `astream()` call must pass flags explicitly
+    or every enhancement is disabled regardless of Settings (see ask.py's docstring)."""
+    return PipelineFlags(**o)
+
+
+def _stages_by_name(events):
+    """{stage_name: [status, ...]} over the `stage` frames, in emission order."""
+    out: dict[str, list[str]] = {}
+    for e in events:
+        if e.event == "stage":
+            out.setdefault(e.data["stage"], []).append(e.data["status"])
+    return out
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_compression_emits_paired_or_skipped_stage(monkeypatch, session, enabled):
+    """F8 runs inline in `_pipeline_events`, so it gets a real started→done span with a measured
+    ms; flag off must still emit ONE `skipped` frame so the UI shows it as deliberately not-run."""
+    await _seed_one_chunk(session)
+    monkeypatch.setattr(retriever, "retrieve", _fake_retrieve_high_score)
+    monkeypatch.setattr(baseline, "build_llm", _fake_llm(FULL_ANSWER))
+    settings = _settings(ENABLE_COMPRESSION=enabled)
+
+    events = await _collect(baseline.astream("q", session=session, settings=settings,
+                                             flags=_flags(compression=enabled)))
+    stages = _stages_by_name(events)
+
+    assert stages["compressing"] == (["started", "done"] if enabled else ["skipped"])
+    if enabled:
+        done = next(e for e in events if e.event == "stage"
+                    and e.data["stage"] == "compressing" and e.data["status"] == "done")
+        assert done.data["ms"] is not None
+
+
+async def test_rerank_stage_reports_out_of_band_duration(monkeypatch, session):
+    """Rerank runs below the generator, so its ms arrives via `rerank.last_rerank_ms()`. Fake a
+    retrieve that sets the ContextVar the way `rerank_chunks` does and assert the stage carries it,
+    and that `searching` is reported NET of it (no double-counting)."""
+    await _seed_one_chunk(session)
+
+    async def _retrieve_that_reranked(*a, **kw):
+        rerank._LAST_MS.set(7)
+        return [_retrieved_chunk(0.9)]
+
+    monkeypatch.setattr(retriever, "retrieve", _retrieve_that_reranked)
+    monkeypatch.setattr(baseline, "build_llm", _fake_llm(FULL_ANSWER))
+    settings = _settings(ENABLE_RERANK=True)
+
+    events = await _collect(baseline.astream("q", session=session, settings=settings,
+                                             flags=_flags(rerank=True)))
+    stage_frames = [e for e in events if e.event == "stage"]
+
+    assert _stages_by_name(events)["reranking"] == ["started", "done"]
+    done = next(e for e in stage_frames
+                if e.data["stage"] == "reranking" and e.data["status"] == "done")
+    assert done.data["ms"] == 7
+    searching = next(e for e in stage_frames
+                     if e.data["stage"] == "searching" and e.data["status"] == "done")
+    assert searching.data["ms"] >= 0  # net of rerank, never negative
+
+
+async def test_rerank_stage_skipped_when_flag_off(monkeypatch, session):
+    await _seed_one_chunk(session)
+    monkeypatch.setattr(retriever, "retrieve", _fake_retrieve_high_score)
+    monkeypatch.setattr(baseline, "build_llm", _fake_llm(FULL_ANSWER))
+    settings = _settings(ENABLE_RERANK=False)
+
+    events = await _collect(baseline.astream("q", session=session, settings=settings))
+    assert _stages_by_name(events)["reranking"] == ["skipped"]
+
+
+async def test_generating_and_citing_report_durations(monkeypatch, session):
+    """Both `done` frames used to ship `ms: null`, so the UI could never show a duration for the
+    two longest stages."""
+    await _seed_one_chunk(session)
+    monkeypatch.setattr(retriever, "retrieve", _fake_retrieve_high_score)
+    monkeypatch.setattr(baseline, "build_llm", _fake_llm(FULL_ANSWER))
+
+    events = await _collect(baseline.astream("q", session=session, settings=_settings()))
+
+    for name in ("generating", "citing"):
+        done = next(e for e in events if e.event == "stage"
+                    and e.data["stage"] == name and e.data["status"] == "done")
+        assert done.data["ms"] is not None, f"{name} done frame carries no ms"
 
 
 async def test_stream_chain_with_retry_retries_before_first_token():

@@ -16,12 +16,24 @@ export function useSession() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const creating = useRef<Promise<string> | null>(null);
 
+  // Bumped whenever the caller selects a session explicitly. A create that was already in flight
+  // when that happens must NOT overwrite the selection — otherwise opening a chat while a create
+  // settles silently swaps the id back, and the next question is posted to the wrong session.
+  const selection = useRef(0);
+
+  const selectSession = useCallback((id: string | null) => {
+    selection.current += 1;
+    creating.current = null;
+    setSessionId(id);
+  }, []);
+
   const ensureSession = useCallback(async (): Promise<string> => {
     if (sessionId) return sessionId;
     if (!creating.current) {
+      const startedAt = selection.current;
       creating.current = fetchJson<SessionOut>("/api/sessions", { method: "POST" })
         .then((s) => {
-          setSessionId(s.id);
+          if (selection.current === startedAt) setSessionId(s.id);
           return s.id;
         })
         .finally(() => {
@@ -33,11 +45,12 @@ export function useSession() {
 
   /** AC-22/AC-23: a new chat gets a new server session; the old one is left intact. */
   const newSession = useCallback(async () => {
-    setSessionId(null);
-    creating.current = null;
-  }, []);
+    selectSession(null);
+  }, [selectSession]);
 
-  return { sessionId, setSessionId, ensureSession, newSession };
+  // `setSessionId` is exposed as `selectSession` so every explicit selection goes through the
+  // in-flight guard — a raw setter would reintroduce the race.
+  return { sessionId, setSessionId: selectSession, ensureSession, newSession };
 }
 
 /** The sidebar list. Authed only — `GET /api/sessions` is 401 for anonymous callers (AC-20). */

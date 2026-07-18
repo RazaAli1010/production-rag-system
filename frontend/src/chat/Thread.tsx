@@ -13,6 +13,13 @@ export const EXAMPLES = [
   "attendance 75% se kam ho to exam de sakta hoon?",
 ];
 
+/** The split is real information, not decoration: both registers work, and students hesitate to
+ *  type the second one until they see it offered. */
+const EXAMPLES_BY_REGISTER = [
+  { label: "In English", questions: EXAMPLES.filter((_, i) => i % 2 === 0) },
+  { label: "Roman Urdu", questions: EXAMPLES.filter((_, i) => i % 2 === 1) },
+];
+
 interface Props {
   turns: Turn[];
   onOpenCitation: (c: Citation, index: number) => void;
@@ -50,24 +57,52 @@ export function Thread({ turns, onOpenCitation, onRetry, onPickExample }: Props)
                 <br />
                 Every answer cites its page.
               </h1>
-              <p className="mt-3 text-sm text-ink-muted">
+
+              {/* Naming the two corpora is the credibility claim — it says what this can and
+                  cannot answer, which is the honest version of a feature list. */}
+              <dl className="mt-5 grid gap-x-6 gap-y-2 border-y border-rule py-4 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="font-mono text-xs uppercase tracking-[0.14em] text-seal">
+                    University of the Punjab
+                  </dt>
+                  <dd className="text-ink-muted">Calendar, statutes, and examination rules.</dd>
+                </div>
+                <div>
+                  <dt className="font-mono text-xs uppercase tracking-[0.14em] text-seal">HEC</dt>
+                  <dd className="text-ink-muted">
+                    Attestation, plagiarism, and degree-equivalence policy.
+                  </dd>
+                </div>
+              </dl>
+
+              <p className="mt-6 text-sm text-ink-muted">
                 Type in English, Urdu, or both. Start with one of these:
               </p>
-              <ul className="mt-4 flex flex-col gap-2">
-                {EXAMPLES.map((q) => (
-                  <li key={q}>
-                    <button
-                      type="button"
-                      dir="auto"
-                      onClick={() => onPickExample(q)}
-                      className="font-urdu-fallback w-full rounded border border-rule bg-paper-raised
-                                 px-3 py-2 text-left text-sm hover:border-seal"
-                    >
-                      {q}
-                    </button>
-                  </li>
+              <div className="mt-3 grid gap-x-6 gap-y-5 sm:grid-cols-2">
+                {EXAMPLES_BY_REGISTER.map(({ label, questions }) => (
+                  <section key={label}>
+                    <h2 className="mb-2 font-mono text-xs uppercase tracking-[0.14em] text-ink-muted">
+                      {label}
+                    </h2>
+                    <ul className="flex flex-col gap-1.5">
+                      {questions.map((q) => (
+                        <li key={q}>
+                          <button
+                            type="button"
+                            dir="auto"
+                            onClick={() => onPickExample(q)}
+                            className="font-urdu-fallback w-full border-l-2 border-rule py-1 pl-3
+                                       text-left text-sm text-ink transition-colors
+                                       hover:border-seal hover:text-seal"
+                          >
+                            {q}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
+              </div>
             </div>
           ) : (
             turns.map((t) => (

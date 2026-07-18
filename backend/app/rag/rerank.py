@@ -21,6 +21,7 @@ as F5's RRF math.
 """
 
 import asyncio
+import contextvars
 import math
 import time
 from typing import Any
@@ -39,6 +40,22 @@ logger = structlog.get_logger(__name__)
 # = None`. The lock serializes the one-time load so concurrent first requests build it only once.
 _RERANK_MODEL: HuggingFaceCrossEncoder | None = None
 _MODEL_LOCK = asyncio.Lock()
+
+# Out-of-band timing signal, mirroring hybrid._DEGRADED / rewrite._REWRITE_RESULT: set inside
+# `rerank_chunks`, read+reset by `baseline._pipeline_events` to emit the `reranking` stage event.
+# rerank runs two levels below the pipeline generator (retriever.retrieve / rewrite.multi_query_
+# retrieve), neither of which can yield an SSE event, so the ms comes back out-of-band instead of
+# restructuring both callers into generators. A ContextVar keeps the seam signatures intact and
+# stays async-task-safe.
+_LAST_MS: contextvars.ContextVar[int | None] = contextvars.ContextVar("rerank_ms", default=None)
+
+
+def last_rerank_ms() -> int | None:
+    """Read-and-reset the out-of-band rerank duration, mirroring `hybrid.was_degraded()`. None when
+    rerank did not run on this request, so the caller can tell "off" from "ran in 0ms"."""
+    ms = _LAST_MS.get()
+    _LAST_MS.set(None)
+    return ms
 
 
 # --------------------------------------------------------------------------- model load (T2)
@@ -121,6 +138,7 @@ async def rerank_chunks(
     (AC-8/AC-20)."""
     if not pool:
         observability.log_rerank(rerank_ms=0, max_score=0.0, n_candidates=0)
+        _LAST_MS.set(0)  # ran, just had nothing to score — distinct from None (= rerank off)
         return []
 
     t0 = time.perf_counter()
@@ -143,6 +161,7 @@ async def rerank_chunks(
     observability.log_rerank(
         rerank_ms=rerank_ms, max_score=max_rerank_score(top), n_candidates=len(pool)
     )
+    _LAST_MS.set(rerank_ms)
     return top
 
 

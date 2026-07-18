@@ -18,15 +18,17 @@ from app.caching import store as cache_store
 from app.core.contracts import AnswerResponse, MemoryContext
 from app.db.engine import get_sessionmaker
 from app.indexing.cost import estimate_cost
+from app.memory import stages
 from app.rag import citations as citations_mod
 from app.rag import compression as compression_mod
 from app.rag import context, observability, prompt, refusal
 from app.rag import errors as errors_mod
 from app.rag import flags as flags_mod
 from app.rag import hybrid as hybrid_mod
+from app.rag import rerank as rerank_mod
 from app.rag import retriever as retriever_mod
 from app.rag import rewrite as rewrite_mod
-from app.rag.events import SSEEvent, stage_event
+from app.rag.events import SSEEvent
 from app.rag.schemas import PipelineFlags
 
 logger = structlog.get_logger(__name__)
@@ -168,9 +170,11 @@ def _replay_cached(hit: AnswerResponse, flags: PipelineFlags) -> list[SSEEvent]:
     """
     response = hit.model_copy(update={"cache_hit": True, "pipeline_flags": flags})
     return [
-        stage_event("searching", "skipped"),
-        stage_event("generating", "skipped"),
-        stage_event("citing", "skipped"),
+        stages.emit("searching", "skipped"),
+        stages.emit("reranking", "skipped"),
+        stages.emit("compressing", "skipped"),
+        stages.emit("generating", "skipped"),
+        stages.emit("citing", "skipped"),
         SSEEvent(event="token", data={"token": response.answer}),
         SSEEvent(event="citations",
                  data={"citations": [c.model_dump() for c in response.citations]}),
@@ -204,19 +208,28 @@ async def _pipeline_events(
     query_vec = None
     if settings.ENABLE_CACHE:
         sessionmaker = sessionmaker or get_sessionmaker()
-        yield stage_event("cache_lookup", "started")
+        yield stages.emit("cache_lookup", "started")
         hit, rr, normalized, query_vec, lookup_ms = await _cache_lookup(
             query, memory, settings, sessionmaker
         )
-        yield stage_event("cache_lookup", "done", ms=lookup_ms)
+        yield stages.emit("cache_lookup", "done", ms=lookup_ms)
         _log_cache_outcome(hit, "redis" if query_vec is None else "semantic", lookup_ms, settings)
         if hit is not None:
             for ev in _replay_cached(hit, flags):
                 yield ev
             return
 
+    # F7: `rewriting` brackets the retrieval call because the rewrite runs *inside*
+    # `rewrite_mod.retrieve`. Flag-driven (not result-driven) so `started` can precede the work;
+    # `last_rewrite()` below only confirms it afterwards. Off → one `skipped` frame, so the UI shows
+    # the stage as deliberately not-run rather than silently missing.
+    if settings.ENABLE_QUERY_REWRITE:
+        yield stages.emit("rewriting", "started")
+    else:
+        yield stages.emit("rewriting", "skipped")
+
     t0 = time.monotonic()
-    yield stage_event("searching", "started")
+    yield stages.emit("searching", "started")
     try:
         # F7: the outer retrieval seam is now `rewrite.retrieve` (still inside the `searching`
         # stage — no new SSE stage). With `ENABLE_QUERY_REWRITE` off it delegates verbatim to
@@ -247,7 +260,22 @@ async def _pipeline_events(
     language_directive = prompt.render_language_directive(
         rewrite_result.language if rewrite_result else None
     )
-    yield stage_event("searching", "done", ms=int((time.monotonic() - t0) * 1000))
+    retrieval_ms = int((time.monotonic() - t0) * 1000)
+    if settings.ENABLE_QUERY_REWRITE:
+        yield stages.emit("rewriting", "done", ms=retrieval_ms if rewrite_result else None)
+
+    # F6: rerank runs two levels below this generator (inside `rewrite.retrieve` →
+    # `retriever.retrieve`), so its duration comes back out-of-band via `last_rerank_ms()` —
+    # the same read-and-reset pattern as `was_degraded()` / `last_rewrite()` above. The paired
+    # frames are therefore emitted just after the work rather than around it; the `ms` is the real
+    # measured span either way. `searching` is reported NET of rerank so the two don't double-count.
+    rerank_ms = rerank_mod.last_rerank_ms() if settings.ENABLE_RERANK else None
+    yield stages.emit("searching", "done", ms=max(retrieval_ms - (rerank_ms or 0), 0))
+    if rerank_ms is None:
+        yield stages.emit("reranking", "skipped")
+    else:
+        yield stages.emit("reranking", "started")
+        yield stages.emit("reranking", "done", ms=rerank_ms)
 
     if refusal.pre_llm_gate(chunks, settings):
         suggestions = refusal.suggestion_citations(chunks, settings.REFUSAL_SUGGESTION_COUNT)
@@ -255,8 +283,9 @@ async def _pipeline_events(
         would_be_prompt = prompt.SYSTEM_PROMPT + context.format_context(chunks) + query
         would_be_tokens_in = len(_ENC.encode(would_be_prompt))
         await observability.log_llm_cost(settings.LLM_MODEL, would_be_tokens_in, 0)
-        yield stage_event("generating", "skipped")
-        yield stage_event("citing", "skipped")
+        yield stages.emit("compressing", "skipped")  # refusal short-circuits before compression
+        yield stages.emit("generating", "skipped")
+        yield stages.emit("citing", "skipped")
         response = AnswerResponse(
             answer="",
             citations=suggestions,
@@ -284,12 +313,19 @@ async def _pipeline_events(
     # `rerank → refusal gate → compress → generate`. Flag off ≡ f7-rewrite-after (no-op). Scoring
     # uses the F7 normalized query (same query F6 reranked against) when rewrite ran, else the raw
     # query. `chunks` is reassigned in place, so the SAME compressed list drives format_context, the
-    # cost token-count, and parse_citations — [n] stays 1:1. No new SSE stage (internal step).
+    # cost token-count, and parse_citations — [n] stays 1:1. Compression is called directly here
+    # (unlike rerank), so it gets a genuine live `started`→`done` span around the real work.
     if settings.ENABLE_COMPRESSION:
+        yield stages.emit("compressing", "started")
+        timer = stages.Timer()
         scoring_query = rewrite_result.normalized if rewrite_result else query
         chunks = await compression_mod.compress_chunks(scoring_query, chunks, settings)
+        yield stages.emit("compressing", "done", ms=timer.ms())
+    else:
+        yield stages.emit("compressing", "skipped")
 
-    yield stage_event("generating", "started")
+    gen_timer = stages.Timer()
+    yield stages.emit("generating", "started")
     memory_block = prompt.render_memory_block(memory)
     chain_input = {"chunks": chunks, "memory_block": memory_block, "question": query,
                    "language_directive": language_directive}
@@ -311,17 +347,18 @@ async def _pipeline_events(
     except Exception as exc:
         yield SSEEvent(event="error", data={"message": str(exc)})
         return
-    yield stage_event("generating", "done")
+    yield stages.emit("generating", "done", ms=gen_timer.ms())
 
     full_prompt = (prompt.SYSTEM_PROMPT + language_directive + context.format_context(chunks)
                    + memory_block + query)
     tokens_in = len(_ENC.encode(full_prompt))
     await observability.log_llm_cost(settings.LLM_MODEL, tokens_in, tokens_out)
 
-    yield stage_event("citing", "started")
+    yield stages.emit("citing", "started")
+    cite_timer = stages.Timer()
     resolved_citations = await citations_mod.parse_citations(answer_text, chunks, session)
     refused = refusal.post_llm_gate(resolved_citations)
-    yield stage_event("citing", "done")
+    yield stages.emit("citing", "done", ms=cite_timer.ms())
 
     if not refused:
         # AC-14: appended as its own trailing token event (not just baked into the internal

@@ -14,6 +14,23 @@ export function relativeTime(iso: string, now = Date.now()): string {
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
+/** Buckets in recency order. The headings carry real information — where "a while ago" ends and
+ *  "this morning" begins is exactly how people look for a chat they half-remember. */
+function groupByRecency(sessions: SessionOut[], now = Date.now()) {
+  const buckets: { label: string; rows: SessionOut[] }[] = [
+    { label: "Today", rows: [] },
+    { label: "This week", rows: [] },
+    { label: "Earlier", rows: [] },
+  ];
+  const DAY = 86_400_000;
+  for (const s of sessions) {
+    const age = now - Date.parse(s.last_active_at);
+    const i = age < DAY ? 0 : age < 7 * DAY ? 1 : 2;
+    buckets[i]!.rows.push(s);
+  }
+  return buckets.filter((b) => b.rows.length > 0);
+}
+
 interface Props {
   sessions: SessionOut[];
   activeId: string | null;
@@ -84,61 +101,73 @@ export function Sidebar({
           ) : sessions.length === 0 ? (
             <p className="p-3 text-sm text-ink-muted">No saved chats yet.</p>
           ) : (
-            <ul className="space-y-0.5">
-              {sessions.map((s) => (
-                <li key={s.id}>
-                  <div
-                    className={`group flex items-center gap-1 rounded px-2 py-1.5 ${
-                      s.id === activeId ? "bg-paper" : "hover:bg-paper"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onOpenSession(s.id);
-                        onClose();
-                      }}
-                      className="min-w-0 flex-1 text-left"
-                    >
-                      <span className="block truncate text-sm">{s.title ?? "Untitled chat"}</span>
-                      <span className="block font-mono text-xs text-ink-muted">
-                        {relativeTime(s.last_active_at)}
-                      </span>
-                    </button>
-                    {confirming === s.id ? (
-                      <span className="flex shrink-0 gap-1">
+            groupByRecency(sessions).map(({ label, rows }) => (
+              <section key={label} className="mb-4 last:mb-0">
+                <h3 className="px-2 pb-1 font-mono text-xs uppercase tracking-[0.14em] text-ink-muted">
+                  {label}
+                </h3>
+                <ul className="space-y-0.5">
+                  {rows.map((s) => (
+                    <li key={s.id}>
+                      <div
+                        className={`group flex items-center gap-1 rounded px-2 py-1.5 ${
+                          s.id === activeId
+                            ? "border-l-2 border-seal bg-paper pl-1.5"
+                            : "border-l-2 border-transparent pl-1.5 hover:bg-paper"
+                        }`}
+                      >
                         <button
                           type="button"
                           onClick={() => {
-                            onDelete(s.id);
-                            setConfirming(null);
+                            onOpenSession(s.id);
+                            onClose();
                           }}
-                          className="rounded px-1.5 py-0.5 text-xs font-medium text-flag"
+                          className="min-w-0 flex-1 text-left"
                         >
-                          Delete
+                          <span className="block truncate text-sm">
+                            {s.title ?? "Untitled chat"}
+                          </span>
+                          <span className="block font-mono text-xs text-ink-muted">
+                            {relativeTime(s.last_active_at)}
+                          </span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirming(null)}
-                          className="rounded px-1.5 py-0.5 text-xs text-ink-muted"
-                        >
-                          Keep
-                        </button>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirming(s.id)}
-                        aria-label={`Delete ${s.title ?? "Untitled chat"}`}
-                        className="shrink-0 rounded px-1.5 py-0.5 text-xs text-ink-muted opacity-0 focus:opacity-100 group-hover:opacity-100"
-                      >
-                        ⋯
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
+                        {confirming === s.id ? (
+                          <span className="flex shrink-0 gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onDelete(s.id);
+                                setConfirming(null);
+                              }}
+                              className="rounded px-1.5 py-0.5 text-xs font-medium text-flag"
+                            >
+                              Delete
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirming(null)}
+                              className="rounded px-1.5 py-0.5 text-xs text-ink-muted"
+                            >
+                              Keep
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirming(s.id)}
+                            aria-label={`Delete ${s.title ?? "Untitled chat"}`}
+                            className="shrink-0 rounded px-1.5 py-0.5 text-xs text-ink-muted
+                                       opacity-0 focus:opacity-100 group-hover:opacity-100"
+                          >
+                            ⋯
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))
           )}
         </nav>
       </aside>

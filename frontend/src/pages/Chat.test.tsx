@@ -174,6 +174,45 @@ describe("authenticated chat", () => {
     expect(screen.getByRole("button", { name: /source 1/i })).toBeInTheDocument();
   });
 
+  it("does not create an empty session on mount", async () => {
+    // The eager `POST /api/sessions` on mount wrote a real, user-bound, EMPTY row on every page
+    // load. Those rows sorted to the top of the sidebar as "Untitled chat" and opened to nothing,
+    // which is what "clicking a chat does nothing" actually was.
+    const created = vi.fn();
+    server.use(
+      http.post("/api/sessions", () => {
+        created();
+        return HttpResponse.json({}, { status: 201 });
+      }),
+    );
+    renderApp();
+
+    await screen.findAllByRole("button", { name: /probation and cgpa/i });
+    expect(created).not.toHaveBeenCalled();
+  });
+
+  it("opens a session with no messages to an empty thread, without an error", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    const [empty] = await screen.findAllByRole("button", { name: /untitled chat/i });
+    await user.click(empty!);
+
+    // The empty state comes back, and nothing is reported as broken.
+    expect(await screen.findByText("probation se kaise nikalta hoon?")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("surfaces an error when a listed session no longer exists", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    const [gone] = await screen.findAllByRole("button", { name: /deleted elsewhere/i });
+    await user.click(gone!);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no longer available/i);
+  });
+
   it("deletes a session after confirming (AC-22)", async () => {
     const user = userEvent.setup();
     const deleted: string[] = [];
