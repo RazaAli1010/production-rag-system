@@ -4,8 +4,10 @@ import type { Citation } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { CitationPanel } from "../chat/CitationPanel";
 import { Composer } from "../chat/Composer";
+import { FlagPicker } from "../chat/FlagPicker";
 import { Thread } from "../chat/Thread";
 import { useAsk } from "../chat/useAsk";
+import { useFlags } from "../chat/useFlags";
 import { useLock } from "../chat/useLock";
 import { Sidebar } from "../sessions/Sidebar";
 import { loadTranscript, useSession, useSessionList } from "../sessions/useSessions";
@@ -16,7 +18,11 @@ export function Chat() {
   const { user } = useAuth();
   const { sessionId, setSessionId, ensureSession, newSession } = useSession();
   const { sessions, refresh, remove } = useSessionList(Boolean(user));
-  const { turns, busyUntil, busyReason, streaming, ask, retry, load, reset } = useAsk(sessionId);
+  const { flags, setFlag, adoptSession, loadFor } = useFlags(sessionId);
+  const { turns, busyUntil, busyReason, streaming, ask, retry, load, reset } = useAsk(
+    sessionId,
+    flags,
+  );
   const { locked, note } = useLock(busyUntil, busyReason);
 
   const [openCitation, setOpenCitation] = useState<{ c: Citation; i: number } | null>(null);
@@ -35,10 +41,11 @@ export function Chat() {
       // Pass the resolved id explicitly: on the very first ask the session was only just created,
       // so `useAsk`'s captured `sessionId` is still null this render.
       const id = await ensureSession();
+      adoptSession(id); // bind the current selection to the (possibly just-created) session
       await ask(question, namespace, id);
       if (user) void refresh(); // the list's title/last_active_at just changed
     },
-    [ask, ensureSession, refresh, user],
+    [adoptSession, ask, ensureSession, refresh, user],
   );
 
   const openSession = useCallback(
@@ -49,6 +56,7 @@ export function Chat() {
         const turns = await loadTranscript(id);
         setSessionId(id);
         load(turns);
+        loadFor(id); // restore the pipeline this conversation was asked with
         setLoadError(null);
       } catch (e) {
         setLoadError(
@@ -58,16 +66,17 @@ export function Chat() {
         );
       }
     },
-    [load, setSessionId],
+    [load, loadFor, setSessionId],
   );
 
   const startNewChat = useCallback(async () => {
     reset();
+    loadFor(null); // back to the defaults, and the picker unlocks with the empty thread
     setLoadError(null);
     // No `ensureSession()` here either — the new server session is created by the first ask.
     // Creating it now would put another empty "Untitled chat" in the sidebar.
     await newSession();
-  }, [newSession, reset]);
+  }, [loadFor, newSession, reset]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -113,7 +122,9 @@ export function Chat() {
           onAsk={(q, ns) => void handleAsk(q, ns)}
           disabled={locked || streaming}
           lockNote={note}
-        />
+        >
+          <FlagPicker flags={flags} onToggle={setFlag} locked={turns.length > 0} />
+        </Composer>
       </div>
 
       <CitationPanel

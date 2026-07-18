@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 export type Namespace = "all" | "pu" | "hec";
 
@@ -18,10 +18,13 @@ interface Props {
   lockNote?: string | null;
   /** Seeded when an example question is picked; the caller remounts to re-seed. */
   initialValue?: string;
+  /** Rendered above the scope row — the pipeline picker lives here so every per-question option
+   *  sits in one place. */
+  children?: ReactNode;
 }
 
 /** T12 — the composer (AC-2, AC-11, AC-41). */
-export function Composer({ onAsk, disabled, lockNote, initialValue = "" }: Props) {
+export function Composer({ onAsk, disabled, lockNote, initialValue = "", children }: Props) {
   const [value, setValue] = useState(initialValue);
   const [ns, setNs] = useState<Namespace>("all");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -47,6 +50,7 @@ export function Composer({ onAsk, disabled, lockNote, initialValue = "" }: Props
   return (
     <div className="border-t border-rule bg-paper px-4 pb-3 pt-2">
       <div className="mx-auto max-w-thread">
+        {children}
         {/* Scope is a refinement, not the main event: it sits as a quiet mono row above the field
             so the send affordance keeps the weight. */}
         <div

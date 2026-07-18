@@ -59,8 +59,9 @@ class AskRequest(BaseModel):
     namespace: str | None = Field(default=None, pattern="^(pu|hec)$", examples=["pu"])
     deep: bool = False
     skip_cache: bool = False
-    # Admin-only pipeline override, e.g. {"hybrid": true, "rerank": false}. Keys validated against
-    # PipelineFlags; a non-admin caller sending this gets 403.
+    # Per-conversation pipeline override, e.g. {"hybrid": true, "rerank": false} — any caller may
+    # send it (the UI picker is the primary producer). Keys validated against PipelineFlags; an
+    # unknown key is 422. Flags gate cost, not privilege, so `rate_limit_dep` is the only guard.
     flags_override: dict[str, bool] | None = None
 
 
@@ -69,13 +70,16 @@ def _encode(ev: SSEEvent) -> str:
     return f"event: {ev.event}\ndata: {json.dumps(ev.data)}\n\n"
 
 
-def _flags_for_request(req: AskRequest, principal: Principal | None) -> PipelineFlags:
+def _flags_for_request(req: AskRequest) -> PipelineFlags:
     """The effective pipeline toggles for THIS request: deployed `ENABLE_*` defaults, `skip_cache`
-    applied to the cache toggle, then an admin `flags_override` on top (AC-1/4).
+    applied to the cache toggle, then the caller's `flags_override` on top (AC-1/4).
 
     This is the seam CLAUDE.md's "flags checked at each seam" refers to — without it, `astream`
     receives no flags and `apply_flags` overlays an all-False `PipelineFlags()`, disabling every
     enhancement regardless of Settings.
+
+    `flags_override` is open to every caller: the F14 picker lets a user choose which enhancements
+    run for their conversation, and the Settings values are just the defaults it starts from.
     """
     flags = PipelineFlags(
         hybrid=settings.ENABLE_HYBRID,
@@ -86,8 +90,6 @@ def _flags_for_request(req: AskRequest, principal: Principal | None) -> Pipeline
         memory=settings.ENABLE_MEMORY,
     )
     if req.flags_override:
-        if principal is None or principal.kind != "admin":
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "flags_override requires admin")
         unknown = set(req.flags_override) - set(PipelineFlags.model_fields)
         if unknown:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -276,7 +278,7 @@ async def ask(
     db: AsyncSession = Depends(get_session),
 ):
     started = time.monotonic()
-    flags = _flags_for_request(req, principal)
+    flags = _flags_for_request(req)
     wants_json = "application/json" in request.headers.get("accept", "")
     log_ctx = _LogCtx(
         user_id=principal.user_id if principal is not None else None,
@@ -286,7 +288,9 @@ async def ask(
         query_hash=exact_key(normalize(req.question)),
     )
 
-    if not settings.ENABLE_MEMORY or req.session_id is None:
+    # `flags.memory`, not the global setting — otherwise a caller turning memory off in
+    # `flags_override` still gets a stateful turn while `pipeline_flags` echoes back `false`.
+    if not flags.memory or req.session_id is None:
         gen = _stateless_events(req.question, req, flags, db)
     else:
         session = await _resolve_owned(request, req.session_id, principal, db)
