@@ -7,6 +7,7 @@ check must never make a billable call.
 """
 
 import asyncio
+import functools
 
 import anyio
 import structlog
@@ -23,7 +24,8 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api", tags=["health"])
 
-_PROBE_TIMEOUT_S = 2.0
+# 5s, not 2s: a cold Pinecone client pays TLS handshake + init (~2.1s measured) on its first call.
+_PROBE_TIMEOUT_S = 5.0
 
 
 async def _postgres(session: AsyncSession) -> str:
@@ -39,12 +41,18 @@ async def _redis() -> str:
     return "ok"
 
 
-def _pinecone_sync() -> None:
-    # Sync client — validates key + index existence in one network call; runs off the loop.
+@functools.lru_cache(maxsize=1)
+def _pc():
+    # Cached so probes reuse one warm connection; a fresh client per health check re-pays the
+    # handshake every time and lands right on the probe timeout.
     from pinecone import Pinecone
 
-    pc = Pinecone(api_key=settings.PINECONE_API_KEY.get_secret_value())
-    pc.describe_index(settings.PINECONE_INDEX)
+    return Pinecone(api_key=settings.PINECONE_API_KEY.get_secret_value())
+
+
+def _pinecone_sync() -> None:
+    # Sync client — validates key + index existence in one network call; runs off the loop.
+    _pc().describe_index(settings.PINECONE_INDEX)
 
 
 async def _pinecone() -> str:
