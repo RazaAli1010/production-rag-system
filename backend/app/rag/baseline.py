@@ -38,7 +38,11 @@ _ENC = tiktoken.get_encoding("cl100k_base")
 
 
 def build_llm(settings):
-    return ChatOpenAI(model=settings.LLM_MODEL, temperature=0)
+    return ChatOpenAI(
+        model=settings.LLM_MODEL,
+        temperature=0,
+        api_key=settings.OPENAI_API_KEY.get_secret_value(),
+    )
 
 
 def build_generate_chain(llm):
