@@ -17,6 +17,8 @@ import type { ApiError } from "../api/errors";
 import { isSessionBusy } from "../api/errors";
 import { askStream } from "../api/sse";
 import type { AnswerMeta, Citation, StageEvent } from "../api/types";
+import type { Flags } from "./useFlags";
+import { DEFAULT_FLAGS } from "./useFlags";
 import type { TrailStage, Turn } from "./types";
 
 interface State {
@@ -122,7 +124,7 @@ function reducer(state: State, a: Action): State {
  */
 const SESSION_BUSY_LOCK_MS = 3000;
 
-export function useAsk(sessionId: string | null) {
+export function useAsk(sessionId: string | null, flags: Flags = DEFAULT_FLAGS) {
   const [state, dispatch] = useReducer(reducer, {
     turns: [],
     busyUntil: null,
@@ -150,8 +152,18 @@ export function useAsk(sessionId: string | null) {
       let sawStreamError = false;
       let refused = false;
       try {
+        const { deep, ...pipeline } = flags;
         for await (const ev of askStream(
-          { question, session_id: activeSessionId, namespace: namespace ?? null } as never,
+          {
+            question,
+            session_id: activeSessionId,
+            namespace: namespace ?? null,
+            // `deep` swaps the model server-side; the rest are the pipeline toggles the user
+            // picked, sent verbatim — the server validates the keys against PipelineFlags.
+            deep,
+            skip_cache: false, // the cache is expressed through `flags_override.cache` instead
+            flags_override: pipeline,
+          },
           { signal: ctrl.signal },
         )) {
           switch (ev.event) {
@@ -219,7 +231,7 @@ export function useAsk(sessionId: string | null) {
       }
       dispatch({ t: "settle", id: turnId, status: refused ? "refused" : "done" });
     },
-    [sessionId],
+    [sessionId, flags],
   );
 
   const ask = useCallback(

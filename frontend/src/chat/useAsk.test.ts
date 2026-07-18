@@ -1,8 +1,11 @@
 /** T7 — turn state machine against the MSW fixtures (AC-3, AC-5, AC-24, AC-26, AC-27, AC-28). */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { server } from "../mocks/server";
 import { __test, useAsk } from "./useAsk";
+import { DEFAULT_FLAGS } from "./useFlags";
 
 const SESSION = "11111111-1111-1111-1111-111111111111";
 
@@ -121,6 +124,35 @@ describe("useAsk", () => {
     });
     expect(hook.result.current.turns).toHaveLength(1);
     expect(hook.result.current.turns[0]!.id).toBe(id);
+  });
+
+  it("sends the user's picked pipeline as flags_override, with deep at the top level", async () => {
+    // The whole point of the picker: what the user selected must reach the server verbatim,
+    // and `deep` must NOT ride inside flags_override (the server 422s on unknown keys).
+    let body: Record<string, unknown> | undefined;
+    server.use(
+      http.post("/api/ask", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return new HttpResponse(null, { status: 503 }); // short-circuit; only the body matters
+      }),
+    );
+    const picked = { ...DEFAULT_FLAGS, hybrid: true, rerank: true, compression: false, deep: true };
+    const hook = renderHook(() => useAsk(SESSION, picked));
+    await act(async () => {
+      await hook.result.current.ask("valid question");
+    });
+
+    expect(body?.deep).toBe(true);
+    expect(body?.session_id).toBe(SESSION);
+    expect(body?.flags_override).toEqual({
+      hybrid: true,
+      rerank: true,
+      query_rewrite: false,
+      compression: false,
+      cache: false,
+      memory: true,
+    });
+    expect(body?.flags_override).not.toHaveProperty("deep");
   });
 
   it("carries degraded through to meta", async () => {

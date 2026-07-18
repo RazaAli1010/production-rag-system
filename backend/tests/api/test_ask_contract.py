@@ -1,8 +1,8 @@
 """T7 — /api/ask input contract + effective-flags construction (AC-1/3/4).
 
 The critical F11 logic: without `_flags_for_request`, `apply_flags` forces every enhancement off. So
-these assert that deployed `ENABLE_*` actually reach the pipeline, that `skip_cache`/`deep`/admin
-`flags_override` are honoured, and that bad input is rejected before any pipeline call.
+these assert that deployed `ENABLE_*` actually reach the pipeline, that `skip_cache`/`deep`/the
+caller's `flags_override` are honoured, and that bad input is rejected before any pipeline call.
 """
 
 import pytest
@@ -67,26 +67,36 @@ async def test_deep_selects_deep_model(client, monkeypatch):
     assert rec.model == "gpt-4o"
 
 
-async def test_flags_override_requires_admin(client, monkeypatch, student):
+async def test_flags_override_open_to_every_caller(client, monkeypatch, student):
+    """The F14 picker lets a user choose their own pipeline, so anonymous and student callers may
+    override — flags gate cost, not privilege, and `rate_limit_dep` is the guard."""
     rec = Recorder()
-    monkeypatch.setattr(ask_router, "astream", make_fake_astream(rec))
-    # anonymous / student → 403
-    anon = await _ask(client, {"question": "valid question", "flags_override": {"hybrid": True}})
-    assert anon.status_code == 403
-    stud = await _ask(client, {"question": "valid question", "flags_override": {"hybrid": True}},
-                      headers=student["headers"])
-    assert stud.status_code == 403
-
-
-async def test_flags_override_admin_applied(client, monkeypatch, admin):
-    rec = Recorder()
-    hot = make_settings(ENABLE_HYBRID=False)
+    hot = make_settings(ENABLE_HYBRID=False, ENABLE_RERANK=True)
     monkeypatch.setattr(ask_router, "settings", hot)
     monkeypatch.setattr(ask_router, "astream", make_fake_astream(rec))
-    r = await _ask(client, {"question": "valid question", "flags_override": {"hybrid": True}},
-                   headers=admin["headers"])
-    assert r.status_code == 200
+
+    anon = await _ask(client, {"question": "valid question",
+                               "flags_override": {"hybrid": True, "rerank": False}})
+    assert anon.status_code == 200
+    assert rec.flags.hybrid is True and rec.flags.rerank is False
+
+    stud = await _ask(client, {"question": "valid question", "flags_override": {"hybrid": True}},
+                      headers=student["headers"])
+    assert stud.status_code == 200
     assert rec.flags.hybrid is True
+
+
+async def test_flags_override_echoed_on_response(client, monkeypatch):
+    """What the user picked must be what `pipeline_flags` reports — the UI renders it."""
+    rec = Recorder()
+    monkeypatch.setattr(ask_router, "settings", make_settings(ENABLE_COMPRESSION=True))
+    monkeypatch.setattr(ask_router, "astream", make_fake_astream(rec))
+    r = await _ask(client, {"question": "valid question",
+                            "flags_override": {"hybrid": True, "compression": False}},
+                   headers={"Accept": "application/json"})
+    assert r.status_code == 200
+    assert r.json()["pipeline_flags"]["hybrid"] is True
+    assert r.json()["pipeline_flags"]["compression"] is False
 
 
 async def test_flags_override_unknown_key_422(client, monkeypatch, admin):
@@ -95,3 +105,32 @@ async def test_flags_override_unknown_key_422(client, monkeypatch, admin):
     r = await _ask(client, {"question": "valid question", "flags_override": {"nope": True}},
                    headers=admin["headers"])
     assert r.status_code == 422
+
+
+async def test_memory_override_off_runs_stateless(client, monkeypatch, sessionmaker_, student):
+    """Regression: the route used to branch on the global ENABLE_MEMORY, so `memory: false` still
+    ran the stateful turn while `pipeline_flags` claimed otherwise. No messages may be written."""
+    from sqlalchemy import func, select
+
+    from app.db.models.chat import Message
+
+    rec = Recorder()
+    monkeypatch.setattr(ask_router, "settings", make_settings(ENABLE_MEMORY=True))
+    monkeypatch.setattr(ask_router, "astream", make_fake_astream(rec))
+
+    created = await client.post("/api/sessions", headers=student["headers"])
+    assert created.status_code in (200, 201)
+    sid = created.json()["id"]
+
+    r = await _ask(client, {"question": "valid question", "session_id": sid,
+                            "flags_override": {"memory": False}}, headers=student["headers"])
+    assert r.status_code == 200
+    assert rec.flags.memory is False
+    assert rec.session_id is None  # stateless path never binds the session
+
+    from app.memory import service
+    await service.drain_writes()
+    async with sessionmaker_() as db:
+        n = await db.scalar(select(func.count()).select_from(Message)
+                            .where(Message.session_id == sid))
+    assert n == 0
