@@ -1,0 +1,64 @@
+@import "./fonts.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ruled-register stock, official navy ink, one violet stamp reserved for citations.
+   Channels are space-separated RGB so Tailwind's <alpha-value> works. */
+:root {
+  --paper: 242 245 248; /* #F2F5F8 pale blue-grey register stock */
+  --paper-raised: 255 255 255;
+  --ink: 21 42 78; /* #152A4E official navy, never pure black */
+  --ink-muted: 90 107 133; /* #5A6B85 */
+  --seal: 31 111 92; /* #1F6F5C institutional green */
+  --stamp: 91 58 142; /* #5B3A8E violet stamp-pad ink — citations only */
+  --flag: 176 71 43; /* #B0472B refusal and error */
+  --rule: 214 223 232;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: 14 23 37; /* #0E1725 */
+    --paper-raised: 22 33 51;
+    --ink: 230 236 243; /* #E6ECF3 */
+    --ink-muted: 148 163 184;
+    --seal: 74 168 145;
+    --stamp: 169 139 216; /* #A98BD8 lifted to hold 4.5:1 on the dark ground */
+    --flag: 224 122 95;
+    --rule: 38 51 71;
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-paper text-ink font-body text-base antialiased;
+  }
+
+  :where(:focus-visible) {
+    @apply outline-none ring-2 ring-seal ring-offset-2 ring-offset-paper;
+  }
+}
+
+@layer utilities {
+  /* Urdu needs far more line height than Latin; applied to any element whose content may be
+     Arabic-script so mixed threads don't clip descenders. */
+  .font-urdu-fallback {
+    font-family: "IBM Plex Sans", "Noto Nastaliq Urdu", system-ui, sans-serif;
+    line-height: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

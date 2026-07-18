@@ -1,0 +1,12 @@
+/* T21 — self-hosted fonts (AC-38, NFR-2).
+   Latin subsets only, and only the weights the type scale actually uses: display 700, body 400/600,
+   utility 500. Every extra weight is bytes a student on 3G pays for. */
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-sans-condensed/latin-700.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+
+/* Urdu. Loaded through @fontsource's own @font-face, which carries a `unicode-range` limited to
+   Arabic script — so a Latin-only session never requests these bytes at all. Nastaliq is a large
+   face; this is the difference between a 120KB and a 400KB first load. */
+@import "@fontsource/noto-nastaliq-urdu/arabic-400.css";
