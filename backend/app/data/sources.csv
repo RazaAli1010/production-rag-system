@@ -1,6 +1,62 @@
 doc_id,title,source_org,url,file_type,version_label,notes
 pu-semester-rules-ug,University of the Punjab Semester Rules & Regulations,PU,https://pu.edu.pk/puac/download/Semester_Rules.pdf,pdf,current,Attendance/grading/probation/promotion/examination rules
-pu-semester-rules-affiliated,University of the Punjab Semester Rules & Regulations for Affiliated Colleges,PU,https://pu.edu.pk/puac/download/Flax-Affiliated-Colleges.pdf,pdf,current,Affiliated-college semester system rules
-pu-fee-schedule-ug-2024,University of the Punjab Fee/Dues Schedule (Undergraduate) FY2024-25,PU,https://pu.edu.pk/downloads/Dues-Fee-Schedule-PU-Students.pdf,pdf,2024-25,Program-wise fee tables (table_lookup source)
-pu-fee-schedule-grad-2024,University of the Punjab Fee/Dues Schedule (MS/MPhil/PhD) FY2024-25,PU,https://pu.edu.pk/downloads/Dues-Fee-Schedule-MS-MPhil-PhD.pdf,pdf,2024-25,Graduate program fee tables (table_lookup source)
-hec-plagiarism-policy-2021,HEC Plagiarism Policy,HEC,https://www.juw.edu.pk/resource/uploads/2021/08/HEC-Plagiarism-Policy.pdf,pdf,2021,University-hosted mirror; hec.gov.pk is SSL-cert-blocked in this environment
+pu-semester-rules-affiliated,PU Semester Rules & Regulations for Affiliated Colleges,PU,https://pu.edu.pk/puac/download/Flax-Affiliated-Colleges.pdf,pdf,current,Affiliated-college semester system rules
+pu-semester-rules-law-pharmacy,PU Semester Rules for LAW & Pharmacy Programs,PU,https://pu.edu.pk/puac/download/Flax-LAW-PHARMACY.pdf,pdf,current,Program-specific semester rules
+pu-admission-regulations,PU Admission Regulations Book,PU,https://pu.edu.pk/downloads/Admission-Regulations-Book.pdf,pdf,current,Consolidated admission regulations
+pu-admission-rules,PU Admission Rules (Affiliated Colleges),PU,https://pu.edu.pk/puac/download/AdmissionRules.pdf,pdf,current,Admission rules via affiliation cell
+pu-affiliation-statutes,PU Affiliation Statutes,PU,https://pu.edu.pk/puac/download/Affiliation-Statutes.pdf,pdf,current,Statutes governing college affiliation
+pu-sops-llb-5years,PU SOPs for LLB 5-Year Program,PU,https://pu.edu.pk/puac/download/SOPs-for-LLB-5Years.pdf,pdf,current,LLB 5-year program SOPs
+pu-exams-schedule,PU Examinations Schedule (Affiliated Colleges),PU,https://pu.edu.pk/puac/download/Exams-Schedule.pdf,pdf,current,Exam scheduling rules
+pu-affiliation-notice-2026-27,PU Affiliation Notice for Session 2026-2027,PU,https://pu.edu.pk/puac/img/Affiliation-Notice-for-the-Session-2026-2027.pdf,pdf,2026-27,Affiliation requirements notice
+pu-act-1973,University of the Punjab Act 1973,PU,https://pu.edu.pk/images/image/PU-act-1973.pdf,pdf,1973,Governing act of the university
+pu-psu-amendment-act-2012,Public Sector Universities (Amendment) Act 2012,PU,https://pu.edu.pk/images/image/The-Public-Sector-Universities-Amendment-Act-2012.pdf,pdf,2012,Amendment to public sector universities act
+pu-honorary-degree-guidelines,PU Guidelines and Procedure for Conferment of Honorary Degree,PU,https://pu.edu.pk/downloads/Guidelines%20and%20Procedure%20for%20Conferment%20of%20Honorary%20Degree.pdf,pdf,current,Honorary degree procedure
+pu-fee-schedule-2025-26,PU Dues & Fee Schedule FY2025-26,PU,https://pu.edu.pk/downloads/Dues-Fee-Schedule-for-the-Financial-Year-2025-26.pdf,pdf,2025-26,University-wide dues/fee tables
+pu-fee-schedule-ug-2025,PU Dues & Fee Schedule (Undergraduate) 2025,PU,https://pu.edu.pk/downloads/Dues-Fee-Schedule-Undergraduate-PU-Students_2025.pdf,pdf,2025,Undergraduate program-wise fees
+pu-fee-schedule-grad-2025,PU Dues & Fee Schedule (MS/MPhil/PhD) 2025,PU,https://pu.edu.pk/downloads/Dues-Fee-Schedule-MS-MPhil-PhD_2025.pdf,pdf,2025,Graduate program-wise fees
+pu-eligibility-criteria-2026-27,PU Instructions & Eligibility Criteria for Admission 2026-27,PU,https://pu.edu.pk/images/image/Admission-Notices/Instructions-Eligibility-Criteria-2026-27.pdf,pdf,2026-27,Admission eligibility criteria
+pu-merit-last-year-2025,PU Closing Merit of Last Year 2025,PU,https://pu.edu.pk/downloads/Merit-of-Last-Year-2025.pdf,pdf,2025,Program-wise closing merit
+pu-online-admission-manual,PU Instruction Manual for Online Admission,PU,https://pu.edu.pk/downloads/Instruction-Manual-Online-Admission.pdf,pdf,current,Online admission application walkthrough
+pu-faqs,PU Frequently Asked Questions,PU,https://pu.edu.pk/downloads/faqs.pdf,pdf,current,Student FAQ booklet
+pu-e-brochure,PU E-Brochure (Programs Offered),PU,https://pu.edu.pk/downloads/E-Brochure.pdf,pdf,current,"Programs, departments, durations"
+pu-regs-ba-bsc-exams,PU Regulations for BA/BSc Examinations,PU,https://pu.edu.pk/images/image/Student-Information/BA-BSc-Examinations.pdf,pdf,current,BA/BSc exam regulations
+pu-regs-ba-bsc-split,PU Regulations for BA/BSc Part-I/Part-II Split Program,PU,https://pu.edu.pk/images/image/Student-Information/BA-BSc-PI-PII-Split-Program.pdf,pdf,current,Split program rules
+pu-regs-bachelor-degree,PU Regulations for Bachelor Degree,PU,https://pu.edu.pk/images/image/Student-Information/Bachelor-Degree.pdf,pdf,current,Bachelor degree regulations
+pu-regs-double-degree,PU Regulations for Double Degree,PU,https://pu.edu.pk/images/image/Student-Information/Double-Degree.pdf,pdf,current,Simultaneous/second degree rules
+pu-regs-llb-part1-exam,PU Regulations for LLB Part-I Examination,PU,https://pu.edu.pk/images/image/Student-Information/LLB-PI-Examination.pdf,pdf,current,LLB Part-I exam regulations
+pu-regs-mba,PU Regulations for MBA,PU,https://pu.edu.pk/images/image/Student-Information/MBA.pdf,pdf,current,MBA program regulations
+pu-regs-mba-affiliated,PU Regulations for MBA in Affiliated Colleges,PU,https://pu.edu.pk/images/image/Student-Information/MBA-Affiliated-Colleges.pdf,pdf,current,MBA affiliated-college regulations
+pu-regs-ma-msc-exams,PU Regulations Pertaining to MA/MSc Examinations,PU,https://pu.edu.pk/images/image/Student-Information/Regulations-Pertaining-MA-MSc-Examinations.pdf,pdf,current,MA/MSc exam regulations
+pu-regs-termination-of-lien,PU Regulations on Termination of Lien,PU,https://pu.edu.pk/images/image/Student-Information/Terminination-of-Lien.pdf,pdf,current,Lien termination rules
+pu-scholarship-bait-ul-mal,Pakistan Bait-ul-Mal Scholarship (PU),PU,https://pu.edu.pk/images/image/Scholarships/Pakistan%20Bait%20ul%20Mal%20Scholarship.pdf,pdf,current,Need-based scholarship criteria
+pu-scholarship-momina-cheema,Momina Cheema Foundation Need-Based Scholarship Eligibility (PU),PU,https://pu.edu.pk/images/image/Scholarships/Momina%20Cheema%20Foundation%20Need%20Based%20Scholarship%20(Eligibility%20Criteria).pdf,pdf,current,Need-based scholarship eligibility
+pu-overseas-phd-scholarships,PU Overseas PhD Scholarships for In-Service Non-PhD Teachers,PU,https://pu.edu.pk/downloads/Overseas-PhD-Scholarships-PU-in-Service-Non-PhD-Teachers_15-01-25.pdf,pdf,2025,Overseas PhD scholarship criteria
+hec-plagiarism-policy,HEC Plagiarism Policy,HEC,https://www.hec.gov.pk/english/policies/Documents/Plagiarism-Policy.pdf,pdf,current,"Plagiarism definitions, penalties, procedure"
+hec-plagiarism-policy-old,HEC Plagiarism Policy (Earlier Version),HEC,https://www.hec.gov.pk/english/services/faculty/Plagiarism/Documents/Plagiarism-Policy-Old.pdf,pdf,legacy,Superseded plagiarism policy
+hec-turnitin-sops,HEC Turnitin Standard Operating Procedures,HEC,https://www.hec.gov.pk/english/services/faculty/Plagiarism/Documents/Turnitin-SoPs.pdf,pdf,current,Turnitin usage SOPs
+hec-turnitin-guidelines,HEC Guidelines on Turnitin,HEC,https://www.hec.gov.pk/english/services/faculty/Documents/Plagiarism/Guidelines%20on%20Turnitin.pdf,pdf,current,Similarity index interpretation
+hec-little-book-of-plagiarism,HEC Little Book of Plagiarism,HEC,https://www.hec.gov.pk/english/services/faculty/Documents/Plagiarism/Little%20Book%20of%20Plagiarism.pdf,pdf,current,Student-facing plagiarism primer
+hec-plagiarism-case-sops,HEC Time-Bound SOPs for Plagiarism Cases,HEC,https://www.hec.gov.pk/english/services/faculty/Documents/Plagiarism/Time%20bound%20SOPs%20for%20Plagiarism%20Cases.pdf,pdf,current,Case handling timelines
+hec-plagiarism-case-handling,How HEC Deals with Plagiarism Cases,HEC,https://www.hec.gov.pk/english/services/faculty/Documents/Plagiarism/How%20does%20HEC%20deals%20with%20Plagiarism%20Cases.pdf,pdf,current,Plagiarism case workflow
+hec-undergraduate-education-policy,HEC Undergraduate Education Policy,HEC,https://www.hec.gov.pk/english/services/students/UEP/Documents/UGE-Policy.pdf,pdf,current,"UG degree structure, credit hours, CGPA rules"
+hec-graduate-education-policy,HEC Graduate Education Policy,HEC,https://www.hec.gov.pk/english/services/faculty/Plagiarism/Documents/Graduate-Education-Policy.pdf,pdf,current,MS/MPhil/PhD structure and requirements
+hec-mphil-phd-criteria,HEC MPhil/PhD Admission & Degree Criteria,HEC,https://www.hec.gov.pk/english/scholarshipsgrants/Documents/MPHIL_Phd_Criteria.pdf,pdf,current,Graduate admission/degree criteria
+hec-final-exam-policy-guidelines,HEC Final Examination Policy Guidelines,HEC,https://www.hec.gov.pk/english/services/universities/Documents/Final%20Examination%20Policy%20Guidelines.pdf,pdf,current,Examination conduct guidelines
+hec-odl-policy,HEC Open & Distance Learning Policy,HEC,https://www.hec.gov.pk/english/policies/Documents/ODL-Policy-Circulated.pdf,pdf,current,ODL program rules
+hec-odl-toolkit,HEC Open & Distance Learning Toolkit,HEC,https://www.hec.gov.pk/english/policies/Documents/ODL-Toolkit.pdf,pdf,current,ODL implementation toolkit
+hec-institutional-policy,HEC Institutional Policy,HEC,https://www.hec.gov.pk/english/universities/Documents/HEC-INSTITUTIONAL-POLICY.pdf,pdf,current,Institution-level governance policy
+hec-foreign-collaboration-policy,HEC Foreign Collaboration Policy,HEC,https://www.hec.gov.pk/english/services/universities/Documents/HEC-Foreign-Collaboratin-Policy.pdf,pdf,current,Rules for foreign degree collaborations
+hec-qec-assessment-criteria,HEC Revised Criteria for Assessment of QECs,HEC,https://www.hec.gov.pk/english/services/universities/QAA/Documents/QAA/1-Revised%20Criteria%20for%20Assessment%20of%20QECs.pdf,pdf,current,Quality Enhancement Cell assessment
+hec-national-fee-refund-policy,HEC National Fee Refund Policy,HEC,https://www.hec.gov.pk/english/policies/Documents/National%20Fee%20Refund%20Policy.pdf,pdf,current,Fee refund schedule on withdrawal
+hec-refund-policy,HEC Refund Policy,HEC,https://www.hec.gov.pk/english/policies/Documents/Refund-Policy.pdf,pdf,current,Refund rules
+hec-harassment-policy,HEC Harassment Policy,HEC,https://www.hec.gov.pk/english/services/Documents/HARASSMENT-POLICY.pdf,pdf,current,Anti-harassment policy for HEIs
+hec-disability-policy,HEC Policy for Students with Disabilities at HEIs,HEC,https://www.hec.gov.pk/english/services/universities/Documents/HEC%20-%20POLICY%20FOR%20STUDENTS%20WITH%20DISABILITIES%20AT%20HEIs%20IN%20PAKISTAN.pdf,pdf,current,Accommodation and access policy
+hec-drugs-tobacco-policy,HEC Policy on Drugs and Tobacco Control at HEIs,HEC,https://www.hec.gov.pk/english/Documents/Policy%20on%20drugs%20and%20tobacco%20control%20at%20HEIs.pdf,pdf,current,Substance control policy
+hec-campus-security-policy,HEC Campus Security and Surveillance Policy,HEC,https://www.hec.gov.pk/english/policies/Documents/Campus-Security-surveillance-policy.pdf,pdf,current,Campus safety requirements
+hec-ddjdp-policy,HEC Policy on Dual Degrees and Joint Degree Programs,HEC,https://www.hec.gov.pk/english/policies/Documents/DDJDP.pdf,pdf,current,Dual/joint degree rules
+hec-grievance-policy,HEC Ethical Appeal Review Board / Grievance Redressal Committee Policy,HEC,https://www.hec.gov.pk/english/policies/Documents/Ethical%20Appeal%20Review%20Board_Grievance%20Redressal%20Committee_Policy.pdf,pdf,current,Student/faculty grievance redressal
+hec-visiting-faculty-guidelines,HEC Guidelines for Engagement of Visiting Faculty in HEIs,HEC,https://www.hec.gov.pk/english/policies/Documents/Guidelines%20for%20Engagement%20of%20Visiting%20Faculty%20in%20Higher%20Education%20Institutions.pdf,pdf,current,Visiting faculty engagement rules
+hec-professor-of-practice-policy,HEC Policy on Appointment of Professor of Practice,HEC,https://www.hec.gov.pk/english/policies/Documents/Appointment-Prof-Practice.pdf,pdf,current,Professor of practice appointments
+hec-orics-policy,HEC ORICs Policy,HEC,https://www.hec.gov.pk/english/policies/Documents/ORICs_Policy.pdf,pdf,current,"Office of Research, Innovation & Commercialization"
+hec-asip-policy,HEC Access to Scientific Instrumentation Program Policy,HEC,https://www.hec.gov.pk/english/policies/Documents/ASIP-Policy.pdf,pdf,current,Shared instrumentation access
+hec-ipfp-policy,HEC Interim Placement of Fresh PhDs Policy,HEC,https://www.hec.gov.pk/english/NAHE/IPFP/Documents/IPFP-Policy.pdf,pdf,current,Fresh PhD placement program

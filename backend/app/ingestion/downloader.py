@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ssl
+from pathlib import Path
 
 import aiofiles
+import certifi
 import httpx
 import structlog
 from tenacity import (
@@ -28,6 +31,18 @@ from app.ingestion.schemas import DocStatus, DownloadOutcome, SourceRow
 logger = structlog.get_logger(__name__)
 
 _PDF_MAGIC = b"%PDF"
+_CA_EXTRA = Path(__file__).resolve().parents[1] / "data" / "ca-extra.pem"
+# Some publishers (hec.gov.pk) serve a leaf cert without its intermediate, so the default
+# trust store can't build a chain. Trusting the extra intermediates explicitly keeps
+# verification ON — never disable `verify`.
+_USER_AGENT = "CampusRAG/1.0 (+https://pu.edu.pk; academic RAG corpus builder)"
+
+
+def make_client() -> httpx.AsyncClient:
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    if _CA_EXTRA.exists():
+        ctx.load_verify_locations(cafile=str(_CA_EXTRA))
+    return httpx.AsyncClient(verify=ctx, headers={"User-Agent": _USER_AGENT})
 _ZIP_MAGIC = b"PK\x03\x04"
 _OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # legacy .doc/.ppt (AC-20) — not a mismatch
 
@@ -119,6 +134,13 @@ async def fetch(
         )
 
     raw = response.content
+    if row.file_type == "pdf":
+        # pu.edu.pk prepends an HTML site-verification <head> block to some PDFs it serves as
+        # application/pdf; the real file starts at the first %PDF marker.
+        offset = raw[:2048].find(_PDF_MAGIC)
+        if offset > 0:
+            logger.info("ingestion.downloader.stripped_pdf_prefix", doc_id=row.doc_id, bytes=offset)
+            raw = raw[offset:]
     if not sniff_content_type(raw, row.file_type):
         logger.warning(
             "ingestion.downloader.content_type_mismatch", doc_id=row.doc_id, declared=row.file_type,

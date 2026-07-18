@@ -52,13 +52,34 @@ def _parse_args(argv):
     p.add_argument("--strategy", choices=["fixed", "structure"])
     p.add_argument("--namespace", choices=["pu", "hec", "all"], default="all")
     p.add_argument("--wipe", action="store_true")
+    p.add_argument("--bm25-only", action="store_true",
+                   help="rebuild data/bm25.pkl from the persisted chunks; no embedding/upsert")
     return p.parse_args(argv)
+
+
+async def rebuild_bm25(sessionmaker, settings):
+    """BM25 spans the whole persisted corpus, not just one run's docs — a single-namespace or
+    resumed run must not silently shrink the sparse index to the subset it touched. Also the
+    deploy path: bm25.pkl is a build artifact, rebuildable from Postgres without re-embedding.
+    """
+    async with sessionmaker() as session:
+        corpus = (await session.execute(
+            select(ChunkRow.chunk_id, ChunkRow.text).order_by(ChunkRow.chunk_id)
+        )).all()
+    await build_and_pickle([c.text for c in corpus], [c.chunk_id for c in corpus], settings)
+    return len(corpus)
 
 
 async def main(argv=None, settings=None, index=None, embeddings=None):
     args = _parse_args(argv)
     settings = settings or default_settings
     strategy = args.strategy or settings.INDEXING_STRATEGY
+
+    if args.bm25_only:
+        count = await rebuild_bm25(get_sessionmaker(), settings)
+        print(f"bm25 rebuilt from {count} persisted chunks -> {settings.BM25_PATH}")
+        return None
+
     await guard_strategy(strategy, args.wipe, settings)
 
     if index is None:
@@ -83,7 +104,7 @@ async def main(argv=None, settings=None, index=None, embeddings=None):
                 await wipe_namespace(index, wipe_session, ns, settings)
             await wipe_session.commit()
 
-    results, skipped, corpus_texts, corpus_ids = [], [], [], []
+    results, skipped = [], []
     for row in rows:
         async with sessionmaker() as doc_session:
             try:
@@ -100,25 +121,26 @@ async def main(argv=None, settings=None, index=None, embeddings=None):
             if result.status == "skipped":
                 skipped.append(row.doc_id)
             results.append(result)
-            corpus_texts.extend(c.text for c in chunks)
-            corpus_ids.extend(c.chunk_id for c in chunks)
 
-    await build_and_pickle(corpus_texts, corpus_ids, settings)
+    await rebuild_bm25(sessionmaker, settings)
 
     manifest_ns = {}
     async with sessionmaker() as recon_session:
-        for ns in namespaces:
+        # The manifest always describes the whole index; only the namespaces this run touched
+        # can be reconciled against freshly upserted vector counts.
+        for ns in ("pu", "hec"):
             db_count = await recon_session.scalar(
                 select(func.count()).select_from(ChunkRow).join(DocRow)
                 .where(func.lower(DocRow.source_org) == ns))
-            vec_count = sum(
-                r.chunk_count for r in results if r.namespace == ns and r.status == "indexed"
-            )
-            if db_count != vec_count:
-                raise SystemExit(
-                    f"reconcile mismatch ns={ns}: vectors={vec_count} chunks={db_count}"
+            if ns in namespaces:
+                vec_count = sum(
+                    r.chunk_count for r in results if r.namespace == ns and r.status == "indexed"
                 )
-            manifest_ns[ns] = {"vectors": vec_count, "chunks": db_count}
+                if db_count != vec_count:
+                    raise SystemExit(
+                        f"reconcile mismatch ns={ns}: vectors={vec_count} chunks={db_count}"
+                    )
+            manifest_ns[ns] = {"vectors": db_count, "chunks": db_count}
 
     total_tokens = sum(r.tokens_in for r in results)
     total_cost = sum(r.cost_usd for r in results)

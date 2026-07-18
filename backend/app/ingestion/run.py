@@ -32,7 +32,7 @@ from app.core.settings import settings as default_settings
 from app.db.engine import get_sessionmaker
 from app.db.models import Document
 from app.ingestion.cleaning import clean
-from app.ingestion.downloader import fetch
+from app.ingestion.downloader import fetch, make_client
 from app.ingestion.loaders.legacy import (
     LegacyConversionError,
     convert_legacy,
@@ -224,7 +224,7 @@ async def main(argv: list[str] | None = None, settings: Settings | None = None) 
                 raise
 
     if selected:
-        async with httpx.AsyncClient() as client:
+        async with make_client() as client:
             results.extend(await asyncio.gather(*(_bounded(client, row) for row in selected)))
 
     report = build_report(results)
