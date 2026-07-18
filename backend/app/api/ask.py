@@ -20,6 +20,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import aclosing
+from dataclasses import dataclass
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -29,13 +30,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user_optional
 from app.auth.schemas import Principal
+from app.caching.keys import exact_key, normalize
 from app.core.contracts import AnswerResponse, PipelineFlags
 from app.core.middleware import request_id_var
 from app.core.ratelimit import rate_limit_dep
 from app.core.settings import settings
 from app.db.engine import get_sessionmaker
+from app.db.enums import RequestChannel
 from app.db.session import get_session
 from app.memory import cookies, service, stages, summarizer
+from app.observability.metrics import RequestMetrics, metrics_var
+from app.observability.request_log import build_row, schedule_request_log
 from app.rag.baseline import astream
 from app.rag.errors import ProviderError
 from app.rag.events import SSEEvent
@@ -178,43 +183,86 @@ def _stamp(data: dict, started: float) -> dict:
     return data
 
 
-async def _sse_stream(gen: AsyncIterator[SSEEvent], started: float) -> AsyncIterator[str]:
+@dataclass
+class _LogCtx:
+    """The request-log fields the transport layer needs but the pipeline doesn't carry (F13)."""
+    user_id: uuid.UUID | None
+    session_id: uuid.UUID | None
+    channel: RequestChannel
+    model: str
+    query_hash: str
+
+
+def _emit_request_log(ctx: _LogCtx, meta: dict | None, http_status: int, error_type: str | None) -> None:
+    """Fire the one write-behind `request_logs` row for this ask (F13, AC-3/4). `meta is None` on a
+    hard error before the pipeline emitted `meta` — build_row fills telemetry defaults so the row
+    still counts toward error_rate. Runs while the request context (and its metrics accumulator) is
+    still live, so `metrics_var` holds this request's timings + spend."""
+    metrics = metrics_var.get() or RequestMetrics()
+    row = build_row(meta, metrics, user_id=ctx.user_id, session_id=ctx.session_id,
+                    channel=ctx.channel, model=ctx.model, http_status=http_status,
+                    error_type=error_type, query_hash=ctx.query_hash)
+    schedule_request_log(row, sessionmaker=get_sessionmaker())
+
+
+async def _sse_stream(
+    gen: AsyncIterator[SSEEvent], started: float, log_ctx: _LogCtx
+) -> AsyncIterator[str]:
     """Serialize events to SSE frames, stamping `meta`, enforcing the server timeout as a terminal
     `error` event (the 200 stream has already started, so status can't change), and closing `gen`
-    so its `finally` (lock release) always runs (AC-17/18)."""
+    so its `finally` (lock release) always runs (AC-17/18). Writes one request_logs row in `finally`
+    (F13) — from `meta` on a clean/refused/degraded run, or an error row on timeout."""
+    meta = None
+    http_status, error_type = 200, None
     try:
         async with aclosing(gen):
             async with asyncio.timeout(settings.REQUEST_TIMEOUT_S):
                 async for ev in gen:
                     if ev.event == "meta":
-                        _stamp(ev.data, started)
+                        meta = _stamp(ev.data, started)
+                    elif ev.event == "error":
+                        error_type = "pipeline_error"  # HTTP status stays 200 — stream is committed
                     yield _encode(ev)
     except TimeoutError:
         logger.warning("api.timeout")
+        http_status, error_type = 504, "timeout"
         yield _encode(SSEEvent(event="error", data={"message": "request timed out"}))
+    finally:
+        _emit_request_log(log_ctx, meta, http_status, error_type)
 
 
-async def _collect(gen: AsyncIterator[SSEEvent], started: float) -> AnswerResponse:
+async def _collect(
+    gen: AsyncIterator[SSEEvent], started: float, log_ctx: _LogCtx
+) -> AnswerResponse:
     """JSON variant: drain the same generator (so lock + write-behind still run), rebuild the
     `AnswerResponse`, and stamp identity. TimeoutError/ProviderError propagate to the F11 handlers
-    (504/503)."""
+    (504/503). Writes one request_logs row in `finally` (F13), including the error paths so
+    error_rate is meaningful."""
     answer_text = ""
     meta = None
-    async with aclosing(gen):
-        async with asyncio.timeout(settings.REQUEST_TIMEOUT_S):
-            async for ev in gen:
-                if ev.event == "token":
-                    answer_text += ev.data["token"]
-                elif ev.event == "meta":
-                    meta = ev.data
-                elif ev.event == "error":
-                    raise ProviderError(ev.data.get("message", "pipeline error"))
-    if meta is None:
-        raise ProviderError("pipeline ended without a meta event")
-    resp = AnswerResponse(answer=answer_text, **meta)
-    resp.request_id = request_id_var.get()
-    resp.latency_ms = int((time.monotonic() - started) * 1000)
-    return resp
+    http_status, error_type = 200, None
+    try:
+        async with aclosing(gen):
+            async with asyncio.timeout(settings.REQUEST_TIMEOUT_S):
+                async for ev in gen:
+                    if ev.event == "token":
+                        answer_text += ev.data["token"]
+                    elif ev.event == "meta":
+                        meta = ev.data
+                    elif ev.event == "error":
+                        raise ProviderError(ev.data.get("message", "pipeline error"))
+        if meta is None:
+            raise ProviderError("pipeline ended without a meta event")
+        _stamp(meta, started)  # request_id + latency_ms onto the dict → row + resp both get them
+    except TimeoutError:
+        http_status, error_type = 504, "timeout"
+        raise
+    except ProviderError:
+        http_status, error_type = 503, "provider_error"
+        raise
+    finally:
+        _emit_request_log(log_ctx, meta, http_status, error_type)
+    return AnswerResponse(answer=answer_text, **meta)
 
 
 @router.post("/ask", summary="Ask a question (SSE stream or JSON)",
@@ -230,6 +278,13 @@ async def ask(
     started = time.monotonic()
     flags = _flags_for_request(req, principal)
     wants_json = "application/json" in request.headers.get("accept", "")
+    log_ctx = _LogCtx(
+        user_id=principal.user_id if principal is not None else None,
+        session_id=req.session_id,
+        channel=RequestChannel.web,
+        model=_pipeline_settings(req).LLM_MODEL,
+        query_hash=exact_key(normalize(req.question)),
+    )
 
     if not settings.ENABLE_MEMORY or req.session_id is None:
         gen = _stateless_events(req.question, req, flags, db)
@@ -244,8 +299,8 @@ async def ask(
         gen = _memory_events(req.question, req, flags, session, db, lock)
 
     if wants_json:
-        return await _collect(gen, started)
-    return StreamingResponse(_sse_stream(gen, started), media_type="text/event-stream")
+        return await _collect(gen, started, log_ctx)
+    return StreamingResponse(_sse_stream(gen, started, log_ctx), media_type="text/event-stream")
 
 
 async def _resolve_owned(request: Request, session_id: uuid.UUID, principal, db):

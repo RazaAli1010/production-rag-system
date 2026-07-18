@@ -9,7 +9,9 @@ per-test env overrides the way an explicit, freshly-constructed `Settings` insta
 
 import structlog
 
+from app.core.middleware import request_id_var
 from app.indexing.cost import estimate_cost
+from app.observability.metrics import record_cost
 
 logger = structlog.get_logger(__name__)
 
@@ -30,12 +32,20 @@ def langfuse_handler(session_id: str | None, settings):
         secret_key=settings.LANGFUSE_SECRET_KEY.get_secret_value(),
         host=settings.LANGFUSE_HOST,
         session_id=session_id,
+        # F13: env tag + request-id correlation, so one request_id resolves to its trace (AC-1).
+        trace_name="ask",
+        tags=[settings.APP_ENV],
+        metadata={"request_id": request_id_var.get()},
     )
 
 
 async def log_llm_cost(model: str, tokens_in: int, tokens_out: int = 0) -> None:
-    """`estimate_cost()` is F2's central cost helper, reused verbatim (AC-26)."""
+    """`estimate_cost()` is F2's central cost helper, reused verbatim (AC-26).
+
+    F13: also accumulates the spend into the per-request metrics (no-op off an ask path), so
+    `request_logs.est_cost_usd` sums every OpenAI call the request made."""
     cost = estimate_cost(model, tokens_in, tokens_out)
+    record_cost(model, tokens_in, tokens_out)
     logger.info("rag.llm_cost", model=model, tokens_in=tokens_in, tokens_out=tokens_out,
                est_cost_usd=cost)
 

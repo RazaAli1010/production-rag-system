@@ -15,6 +15,7 @@ from app.core.exceptions import AuthError
 from app.core.middleware import RequestContextMiddleware
 from app.core.ratelimit import RateLimited
 from app.core.settings import settings
+from app.observability.logging import configure_logging
 from app.rag.errors import ProviderError
 
 logger = structlog.get_logger(__name__)
@@ -22,6 +23,7 @@ logger = structlog.get_logger(__name__)
 
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
+    configure_logging(settings)  # F13: the one structlog.configure, JSON logs + request_id (AC-7)
     yield
     # Drop the pooled redis.asyncio clients (limiter + F9 cache share them) on shutdown.
     await redis_hot.close()

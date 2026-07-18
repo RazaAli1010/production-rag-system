@@ -81,8 +81,10 @@ async def _cleanup_tables(engine):
     test itself so the corpus stays untouched here."""
     yield
     from app.memory import service
+    from app.observability import request_log
 
     await service.drain_writes()
+    await request_log.drain_writes()  # F13 request_logs write-behind — same discipline as F17's
     async with engine.begin() as conn:
         await conn.execute(
             text("TRUNCATE TABLE messages, sessions, refresh_tokens, request_logs CASCADE")
