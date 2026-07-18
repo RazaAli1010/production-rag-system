@@ -15,6 +15,8 @@ from contextvars import ContextVar
 import structlog
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.observability.metrics import RequestMetrics, metrics_var
+
 # Default kept non-None so a log emitted outside any request (startup, a bare task) still renders a
 # value rather than raising LookupError.
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
@@ -37,6 +39,8 @@ class RequestContextMiddleware:
 
         rid = _inbound_id(scope) or uuid.uuid4().hex
         token = request_id_var.set(rid)
+        # F13: fresh metrics accumulator per request; the pipeline feeds it, the ask route reads it.
+        metrics_token = metrics_var.set(RequestMetrics())
         structlog.contextvars.bind_contextvars(request_id=rid)
         start = time.perf_counter()
 
@@ -53,6 +57,7 @@ class RequestContextMiddleware:
         finally:
             structlog.contextvars.unbind_contextvars("request_id")
             request_id_var.reset(token)
+            metrics_var.reset(metrics_token)
 
 
 def _inbound_id(scope: Scope) -> str | None:

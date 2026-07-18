@@ -232,6 +232,12 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: SecretStr | None = None
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
 
+    # --- Observability (F13) ---
+    APP_ENV: str = "dev"  # Langfuse env tag + structlog field; "prod" on Render
+    LOG_LEVEL: str = "INFO"
+    LOG_JSON: bool = True  # False → ConsoleRenderer for readable local dev
+    STATS_DEFAULT_WINDOW_H: int = 24  # GET /internal/stats default window
+
     # --- Evaluation harness (F4) ---
     # Paths relative to the `backend/` cwd (how alembic/pytest/`python -m app...` all run).
     EVAL_DATASET_PATH: Path = Path("app/data/evals/qa_dataset.jsonl")  # git-versioned QA set (AC-1)
