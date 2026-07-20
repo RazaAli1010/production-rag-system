@@ -14,5 +14,12 @@ class SSEEvent(BaseModel):
     data: dict
 
 
-def stage_event(stage: str, status: str, ms: int | None = None) -> SSEEvent:
-    return SSEEvent(event="stage", data=StageEvent(stage=stage, status=status, ms=ms).model_dump())
+def stage_event(stage: str, status: str, ms: int | None = None,
+                detail: dict | None = None) -> SSEEvent:
+    data = StageEvent(stage=stage, status=status, ms=ms, detail=detail).model_dump()
+    if detail is None:
+        # Omitted rather than sent as null, so a frame with nothing to show stays byte-identical to
+        # the pre-trace contract — every existing consumer and frame assertion is untouched, and
+        # `ENABLE_TRACE=false` adds not one byte to the stream.
+        data.pop("detail")
+    return SSEEvent(event="stage", data=data)

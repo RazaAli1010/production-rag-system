@@ -1,4 +1,4 @@
-import type { AnswerMeta, Citation, StageEvent } from "../api/types";
+import type { AnswerMeta, Citation, StageDetail, StageEvent } from "../api/types";
 import type { ApiError } from "../api/errors";
 
 /**
@@ -14,6 +14,8 @@ export interface TrailStage {
   stage: string;
   status: StageEvent["status"];
   ms: number | null;
+  /** What this stage actually produced (`ENABLE_TRACE`); absent on `started`/`skipped`. */
+  detail?: StageDetail | null;
 }
 
 export interface Turn {

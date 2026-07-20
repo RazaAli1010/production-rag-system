@@ -17,8 +17,6 @@ import type { ApiError } from "../api/errors";
 import { isSessionBusy } from "../api/errors";
 import { askStream } from "../api/sse";
 import type { AnswerMeta, Citation, StageEvent } from "../api/types";
-import type { Flags } from "./useFlags";
-import { DEFAULT_FLAGS } from "./useFlags";
 import type { TrailStage, Turn } from "./types";
 
 interface State {
@@ -45,10 +43,13 @@ type Action =
 /** Merge a `done`/`skipped` onto the matching open `started`, else append. */
 function mergeStage(stages: TrailStage[], ev: StageEvent): TrailStage[] {
   if (ev.status === "started") return [...stages, { stage: ev.stage, status: "started", ms: null }];
+  // `detail` arrives on the closing frame, so it lands on the merged entry and survives into the
+  // finished turn's receipt — the trace stays inspectable after the answer, which is the point.
+  const closed = { stage: ev.stage, status: ev.status, ms: ev.ms, detail: ev.detail };
   const i = stages.findIndex((s) => s.stage === ev.stage && s.status === "started");
-  if (i === -1) return [...stages, { stage: ev.stage, status: ev.status, ms: ev.ms }];
+  if (i === -1) return [...stages, closed];
   const next = [...stages];
-  next[i] = { stage: ev.stage, status: ev.status, ms: ev.ms };
+  next[i] = closed;
   return next;
 }
 
@@ -124,7 +125,7 @@ function reducer(state: State, a: Action): State {
  */
 const SESSION_BUSY_LOCK_MS = 3000;
 
-export function useAsk(sessionId: string | null, flags: Flags = DEFAULT_FLAGS) {
+export function useAsk(sessionId: string | null) {
   const [state, dispatch] = useReducer(reducer, {
     turns: [],
     busyUntil: null,
@@ -152,17 +153,15 @@ export function useAsk(sessionId: string | null, flags: Flags = DEFAULT_FLAGS) {
       let sawStreamError = false;
       let refused = false;
       try {
-        const { deep, ...pipeline } = flags;
         for await (const ev of askStream(
           {
             question,
             session_id: activeSessionId,
             namespace: namespace ?? null,
-            // `deep` swaps the model server-side; the rest are the pipeline toggles the user
-            // picked, sent verbatim — the server validates the keys against PipelineFlags.
-            deep,
-            skip_cache: false, // the cache is expressed through `flags_override.cache` instead
-            flags_override: pipeline,
+            // No pipeline fields: which stages run is a deployment decision (`ENABLE_*`), not a
+            // per-request one. Sending an override here is what silently pinned every browser ask
+            // to the bare baseline. `meta.pipeline_flags` echoes back what actually ran.
+            deep: false,
           },
           { signal: ctrl.signal },
         )) {
@@ -231,7 +230,7 @@ export function useAsk(sessionId: string | null, flags: Flags = DEFAULT_FLAGS) {
       }
       dispatch({ t: "settle", id: turnId, status: refused ? "refused" : "done" });
     },
-    [sessionId, flags],
+    [sessionId],
   );
 
   const ask = useCallback(

@@ -104,6 +104,11 @@ All producers are async generators (`astream_events` → FastAPI `StreamingRespo
 stage may block the event loop**. Even the F3 baseline emits `stage` events so F17/F14 need
 no contract change — later features only add stages.
 
+A `stage` frame with `status: done` may carry `detail` — that stage's intermediate output
+(`app/rag/trace.py`: fused candidates, rerank reordering, what compression dropped), gated on
+`ENABLE_TRACE`. Seams call `trace.record()`; the single `stages.emit` seam attaches it. The key is
+OMITTED when there is nothing to show, so the frame stays byte-identical to the pre-trace contract.
+
 ## Pipeline order (F11, sequence diagram required)
 
 validate → auth → rate limit → **load memory + summarize-if-flagged (F17)** → rewrite/condense
@@ -117,7 +122,11 @@ events via the single F17 emitter (`app/memory/stages.py`).
 - Secrets/URLs: `OPENAI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX`, `DATABASE_URL`
   (Postgres, asyncpg), `REDIS_URL`, `JWT_SECRET`, `LANGFUSE_*`.
 - Feature flags: `ENABLE_HYBRID`, `ENABLE_RERANK`, `ENABLE_QUERY_REWRITE`,
-  `ENABLE_COMPRESSION`, `ENABLE_CACHE`, `ENABLE_MEMORY`.
+  `ENABLE_COMPRESSION`, `ENABLE_CACHE`, `ENABLE_MEMORY`, `ENABLE_TRACE`.
+  These are a DEPLOYMENT decision: there is no per-request `flags_override` and no UI picker.
+  (There was; it applied last and its all-false UI defaults silently pinned every browser ask to
+  the bare F3 baseline regardless of `.env`.) The F4 harness still drives flags directly via
+  `PipelineFlags`, and `skip_cache` remains on the wire for the latency suite.
 - Memory: `MEMORY_TOKEN_BUDGET=50_000`, `MEMORY_WINDOW_PAIRS=5` (sliding window),
   `MEMORY_KEEP_LAST_PAIRS=2` (shrunken window once over budget),
   `MEMORY_SUMMARIZE_EVERY_PAIRS=3` (lazy-summary batch), `MEMORY_SUMMARY_MAX_TOKENS=600`.

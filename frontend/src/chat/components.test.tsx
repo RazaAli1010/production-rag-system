@@ -50,6 +50,51 @@ describe("StampTrail", () => {
     expect(live.textContent).toBe("Writing the answer");
     expect(live.textContent).not.toMatch(/\d+ms/);
   });
+
+  it("expands a traced stage to show what it produced", async () => {
+    // Reranking is the stage whose effect is invisible from timings alone: the trace has to show
+    // the cross-encoder MOVING a passage, not just that it took 120ms.
+    const user = userEvent.setup();
+    const traced: TrailStage[] = [
+      {
+        stage: "reranking",
+        status: "done",
+        ms: 120,
+        detail: {
+          n_candidates: 2,
+          kept: 2,
+          before: [
+            { chunk_id: "d:1", title: "Weak match", section: null, page: 3, text: "…", score: 0.4 },
+            { chunk_id: "d:2", title: "Strong match", section: null, page: 9, text: "…", score: 0.3 },
+          ],
+          after: [
+            {
+              chunk_id: "d:2",
+              title: "Strong match",
+              section: null,
+              page: 9,
+              text: "…",
+              score: 0.98,
+              moved: 1,
+            },
+          ],
+        },
+      },
+    ];
+    render(<StampTrail stages={traced} />);
+    const stamp = screen.getByRole("button", { name: /reranking results/i });
+    expect(screen.queryByText(/cross-encoder/i)).not.toBeInTheDocument();
+
+    await user.click(stamp);
+    expect(stamp).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/after \(cross-encoder\)/i)).toBeInTheDocument();
+    expect(screen.getByText("▲1")).toBeInTheDocument(); // promoted one place
+  });
+
+  it("leaves an untraced stage as inert text, not a dead control", () => {
+    render(<StampTrail stages={stages} />);
+    expect(screen.queryByRole("button", { name: /searching documents/i })).not.toBeInTheDocument();
+  });
 });
 
 describe("WorkedChip", () => {

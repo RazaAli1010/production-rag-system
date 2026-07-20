@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { totalStageMs, type TrailStage } from "./types";
 import { seconds, stageLabel } from "./stages";
+import { hasDetail, StageDetailView } from "./StageDetail";
 
 /**
  * T9 — the signature element (AC-3, AC-4, AC-5, AC-40, AC-43).
@@ -14,12 +15,37 @@ import { seconds, stageLabel } from "./stages";
  */
 
 function Stamp({ stage, live }: { stage: TrailStage; live: boolean }) {
+  const [open, setOpen] = useState(false);
   const skipped = stage.status === "skipped";
   const running = stage.status === "started";
+  const expandable = hasDetail(stage.stage, stage.detail);
+
+  const row = (
+    <>
+      <span className={`text-sm ${skipped ? "line-through" : ""}`}>{stageLabel(stage.stage)}</span>
+      {running && (
+        <span className="font-mono text-xs text-ink-muted" aria-hidden="true">
+          …
+        </span>
+      )}
+      {expandable && (
+        <span className="font-mono text-xs text-ink-muted" aria-hidden="true">
+          {open ? "▴" : "▾"}
+        </span>
+      )}
+      {stage.ms != null && !skipped && (
+        <span className="ml-auto font-mono text-xs text-ink-muted">{stage.ms}ms</span>
+      )}
+    </>
+  );
+
   return (
     <li
       className={[
-        "flex items-baseline gap-2 rounded-[3px] border px-2 py-1",
+        "rounded-[3px] border px-2 py-1",
+        // Only an OPEN stamp breaks the trail's narrow column — the three retrieval lists need the
+        // room, and widening every stamp would flatten the compact stacked look the trail is for.
+        open ? "w-[min(46rem,78vw)]" : "",
         live ? "animate-press" : "",
         skipped
           ? "border-rule/60 bg-transparent text-ink-muted opacity-40"
@@ -27,15 +53,21 @@ function Stamp({ stage, live }: { stage: TrailStage; live: boolean }) {
       ].join(" ")}
       style={{ transform: `rotate(${stage.stage.length % 2 === 0 ? "-0.6deg" : "0.6deg"})` }}
     >
-      <span className={`text-sm ${skipped ? "line-through" : ""}`}>{stageLabel(stage.stage)}</span>
-      {running && (
-        <span className="font-mono text-xs text-ink-muted" aria-hidden="true">
-          …
-        </span>
+      {/* A stage with a trace becomes a button; one without stays inert text rather than a control
+          that looks clickable and does nothing. */}
+      {expandable ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex w-full items-baseline gap-2 text-left"
+        >
+          {row}
+        </button>
+      ) : (
+        <div className="flex items-baseline gap-2">{row}</div>
       )}
-      {stage.ms != null && !skipped && (
-        <span className="ml-auto font-mono text-xs text-ink-muted">{stage.ms}ms</span>
-      )}
+      {open && <StageDetailView stage={stage.stage} detail={stage.detail} />}
     </li>
   );
 }

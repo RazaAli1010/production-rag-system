@@ -25,7 +25,7 @@ import structlog
 import tiktoken
 
 from app.core.contracts import RetrievedChunk
-from app.rag import observability
+from app.rag import observability, trace
 
 logger = structlog.get_logger(__name__)
 
@@ -215,6 +215,29 @@ async def compress_chunks(
         return chunks
 
     tokens_after = sum(count_tokens(c.text) for c in kept)
+    # What compression actually threw away. `dropped` = whole chunks removed by dedupe or the
+    # relevance floor; `trimmed` = chunks that survived but lost sentences to the token budget, as
+    # before/after token counts so a shortened passage is distinguishable from an untouched one.
+    kept_by_id = {c.chunk_id: c for c in kept}
+    trace.record("compressing", {
+        "tokens_before": tokens_before,
+        "tokens_after": tokens_after,
+        "chunks_before": len(chunks),
+        "chunks_after": len(kept),
+        "sentences_dropped": sentences_dropped,
+        "dropped": trace.chunk_rows([c for c in chunks if c.chunk_id not in kept_by_id]),
+        "trimmed": [
+            {
+                "chunk_id": c.chunk_id,
+                "title": c.title,
+                "tokens_before": count_tokens(c.text),
+                "tokens_after": count_tokens(kept_by_id[c.chunk_id].text),
+                "text_after": trace.clip(kept_by_id[c.chunk_id].text),
+            }
+            for c in chunks[:trace.MAX_ITEMS]
+            if c.chunk_id in kept_by_id and kept_by_id[c.chunk_id].text != c.text
+        ],
+    })
     observability.log_compression(
         tokens_before=tokens_before,
         tokens_after=tokens_after,

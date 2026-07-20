@@ -4,7 +4,7 @@ F17 owns the core: memory binding, the per-session lock (409 `session_busy`), us
 assistant write-behind, and the `summarizing_memory` stage — all unchanged here. F11 adds the public
 surface around it:
 
-- input contract (question 3–500, namespace/deep/skip_cache/flags_override) + validation;
+- input contract (question 3–500, namespace/deep/skip_cache) + validation;
 - the effective `PipelineFlags` built from `Settings` (F17 shipped the route with NO flags, so
   `apply_flags` was forcing every enhancement off — F11 makes deployed `ENABLE_*` take effect);
 - `deep=true` → the `gpt-4o` deep model via a settings copy (no baseline.py change);
@@ -41,6 +41,7 @@ from app.db.session import get_session
 from app.memory import cookies, service, stages, summarizer
 from app.observability.metrics import RequestMetrics, metrics_var
 from app.observability.request_log import build_row, schedule_request_log
+from app.rag import trace
 from app.rag.baseline import astream
 from app.rag.errors import ProviderError
 from app.rag.events import SSEEvent
@@ -58,11 +59,9 @@ class AskRequest(BaseModel):
     session_id: uuid.UUID | None = None
     namespace: str | None = Field(default=None, pattern="^(pu|hec)$", examples=["pu"])
     deep: bool = False
+    # The F4 latency suite's cache bypass (CLAUDE.md: "the harness always runs skip_cache=true").
+    # NOT a user-facing toggle — the UI never sends it.
     skip_cache: bool = False
-    # Per-conversation pipeline override, e.g. {"hybrid": true, "rerank": false} — any caller may
-    # send it (the UI picker is the primary producer). Keys validated against PipelineFlags; an
-    # unknown key is 422. Flags gate cost, not privilege, so `rate_limit_dep` is the only guard.
-    flags_override: dict[str, bool] | None = None
 
 
 def _encode(ev: SSEEvent) -> str:
@@ -71,15 +70,17 @@ def _encode(ev: SSEEvent) -> str:
 
 
 def _flags_for_request(req: AskRequest) -> PipelineFlags:
-    """The effective pipeline toggles for THIS request: deployed `ENABLE_*` defaults, `skip_cache`
-    applied to the cache toggle, then the caller's `flags_override` on top (AC-1/4).
+    """The effective pipeline toggles for THIS request: the deployed `ENABLE_*` values, with
+    `skip_cache` applied to the cache toggle. Nothing else — the pipeline is a deployment decision.
 
     This is the seam CLAUDE.md's "flags checked at each seam" refers to — without it, `astream`
     receives no flags and `apply_flags` overlays an all-False `PipelineFlags()`, disabling every
     enhancement regardless of Settings.
 
-    `flags_override` is open to every caller: the F14 picker lets a user choose which enhancements
-    run for their conversation, and the Settings values are just the defaults it starts from.
+    The per-request `flags_override` (and the F14 picker that produced it) is GONE. It applied last
+    and therefore silently overrode the deployed config: the UI's all-false defaults meant every ask
+    from the browser ran the bare F3 baseline no matter what `.env` said. Toggling for A/B and
+    rollback lives in Settings, which is what CLAUDE.md's "toggleable via a config flag" asks for.
     """
     flags = PipelineFlags(
         hybrid=settings.ENABLE_HYBRID,
@@ -89,12 +90,6 @@ def _flags_for_request(req: AskRequest) -> PipelineFlags:
         cache=settings.ENABLE_CACHE and not req.skip_cache,
         memory=settings.ENABLE_MEMORY,
     )
-    if req.flags_override:
-        unknown = set(req.flags_override) - set(PipelineFlags.model_fields)
-        if unknown:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                f"unknown flags: {sorted(unknown)}")
-        flags = flags.model_copy(update=req.flags_override)
     return flags
 
 
@@ -125,6 +120,10 @@ async def _run_summary_stage(db, session, recent_pending) -> None:
             timeout=settings.MEMORY_SUMMARY_TIMEOUT_S,
         )
         await service.apply_summary(db, session, new_summary, upto_id=pending[-1].id)
+        trace.record(stages.MEMORY_STAGE, {
+            "pairs_folded": len(pending),
+            "summary": trace.clip(new_summary or ""),
+        })
     except Exception as exc:  # noqa: BLE001 — summary is best-effort; pending stays pending, retried
         logger.warning("memory.summarize_failed", session_id=str(session.id), error=str(exc))
 
@@ -135,6 +134,10 @@ async def _memory_events(
 ) -> AsyncIterator[SSEEvent]:
     """The memory-on turn (F17). Holds `lock` for the whole stream and releases it in `finally`."""
     try:
+        # `summarizing_memory` runs out here, BEFORE `_pipeline_events` installs its own trace, so
+        # this stage needs the trace installed now or its detail lands nowhere. The later reinstall
+        # inside the pipeline is harmless: this stage's detail has already been popped and emitted.
+        trace.start(settings)
         # 1) user message FIRST (F17 AC-10) — created_at sorts before the assistant write-behind.
         await service.persist_user(db, session, question, settings)
 

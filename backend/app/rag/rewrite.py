@@ -39,7 +39,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.core.contracts import MemoryContext, RetrievedChunk, RewriteResult
-from app.rag import observability, prompt
+from app.rag import observability, prompt, trace
 from app.rag import retriever as retriever_mod
 
 logger = structlog.get_logger(__name__)
@@ -178,6 +178,13 @@ async def rewrite_query(query: str, memory: MemoryContext | None, settings) -> R
         result = RewriteResult(normalized=query, variants=[], language=None, failed=True)
 
     rewrite_ms = int((time.perf_counter() - t0) * 1000)
+    trace.record("rewriting", {
+        "original": trace.clip(query),
+        "normalized": trace.clip(result.normalized),
+        "variants": [trace.clip(v) for v in result.variants],
+        "language": result.language,
+        "failed": result.failed,
+    })
     observability.log_rewrite(
         rewrite_ms=rewrite_ms,
         n_variants=len(result.variants),

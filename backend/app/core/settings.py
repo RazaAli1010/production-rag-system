@@ -199,6 +199,12 @@ class Settings(BaseSettings):
     MEMORY_ANON_MAX_MESSAGES: int = 30  # anonymous session message cap (AC-7)
     MEMORY_ANON_TTL_DAYS: int = 7  # anonymous inactivity TTL, pruned by the F12 job (AC-7)
 
+    # --- Pipeline trace (demo/inspection) ---
+    # Attaches each stage's intermediate output (fused candidates, rerank reordering, what
+    # compression dropped) to that stage's `done` SSE frame as `detail`. Costs one small dict per
+    # stage and no extra model call. Off ⇒ `detail` is absent and every `record()` is a no-op.
+    ENABLE_TRACE: bool = True
+
     # --- API hardening (F11) ---
     ENABLE_RATE_LIMIT: bool = True  # prod toggle; False ≡ F17 route, never 429 (AC-12/22)
     CORS_ALLOW_ORIGINS: list[str] = []  # exact-origin allowlist; empty ⇒ no cross-origin (AC-15)

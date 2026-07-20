@@ -31,7 +31,7 @@ import structlog
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 
 from app.core.contracts import RetrievedChunk
-from app.rag import observability
+from app.rag import observability, trace
 
 logger = structlog.get_logger(__name__)
 
@@ -158,6 +158,19 @@ async def rerank_chunks(
     top = reranked[: settings.RERANK_TOP_N]
 
     rerank_ms = int((time.perf_counter() - t0) * 1000)
+    # before/after, with each surviving chunk's movement — the one stage whose effect is invisible
+    # from timings alone. `moved` is (old rank - new rank): positive = cross-encoder promoted it.
+    before_rank = {c.chunk_id: i for i, c in enumerate(pool)}
+    trace.record("reranking", {
+        "query": trace.clip(query),
+        "n_candidates": len(pool),
+        "kept": len(top),
+        "before": trace.chunk_rows(pool, "fused_score"),
+        "after": [
+            dict(trace.chunk_row(c, "rerank_score"), moved=before_rank[c.chunk_id] - i)
+            for i, c in enumerate(top[:trace.MAX_ITEMS])
+        ],
+    })
     observability.log_rerank(
         rerank_ms=rerank_ms, max_score=max_rerank_score(top), n_candidates=len(pool)
     )

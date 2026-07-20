@@ -16,6 +16,7 @@ Revisit only if a stage is ever produced off the generator's own coroutine.
 import time
 
 from app.observability.metrics import record_stage
+from app.rag import trace
 from app.rag.events import SSEEvent, stage_event
 
 # The full pipeline stage order (design §3.6 / CLAUDE.md pipeline order). F17 adds only the leading
@@ -33,10 +34,14 @@ def emit(stage: str, status: str, ms: int | None = None) -> SSEEvent:
 
     F13: this single seam also records each `done` span into the request metrics accumulator, so the
     `request_logs` row gets every stage timing without touching each F5–F8 caller (no-op off an ask).
+
+    The same single seam attaches the stage's trace detail (`rag/trace.py`) on `done`, so the seams
+    that produce the intermediate data just call `trace.record()` and never touch SSE shaping.
     """
     if status == "done" and ms is not None:
         record_stage(stage, ms)
-    return stage_event(stage, status, ms=ms)
+    detail = trace.pop(stage) if status == "done" else None
+    return stage_event(stage, status, ms=ms, detail=detail)
 
 
 class Timer:
