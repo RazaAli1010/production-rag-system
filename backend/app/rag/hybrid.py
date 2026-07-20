@@ -24,6 +24,7 @@ from app.indexing.bm25 import urdu_safe_tokenize  # SAME tokenizer that built th
 from app.indexing.vectorstore import get_index
 from app.rag import errors as errors_mod
 from app.rag import retriever as retriever_mod
+from app.rag import trace
 
 logger = structlog.get_logger(__name__)
 
@@ -209,7 +210,25 @@ async def hybrid_retrieve(
     dense_ids = {c.chunk_id for c in dense}
     sparse_only_ids = [cid for cid, _, _ in sparse if cid not in dense_ids]
     sparse_chunks = await hydrate_sparse_only(sparse_only_ids, namespace, settings)
-    return rrf_fuse(dense, sparse, sparse_chunks, settings)
+    fused = rrf_fuse(dense, sparse, sparse_chunks, settings)
+
+    # The demo's headline: what each half of the hybrid found, and what fusion made of it. Appended
+    # (not recorded) because query rewrite fans this out — one card per fan-out query.
+    trace.append("searching", {
+        "query": trace.clip(query),
+        "dense": trace.chunk_rows(dense, "dense_score"),
+        # Sparse rows come from the BM25 tuples, so the hydrated chunk supplies the title/text and
+        # a chunk that hydration dropped is simply not showable.
+        "sparse": [
+            dict(trace.chunk_row(chunk), score=sscore)
+            for cid, sscore, _ in sparse[:trace.MAX_ITEMS]
+            if (chunk := sparse_chunks.get(cid) or next(
+                (d for d in dense if d.chunk_id == cid), None)) is not None
+        ],
+        "fused": trace.chunk_rows(fused, "fused_score"),
+        "degraded": _DEGRADED.get(),
+    })
+    return fused
 
 
 async def sparse_only(

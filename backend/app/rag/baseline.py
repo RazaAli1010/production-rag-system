@@ -21,7 +21,7 @@ from app.indexing.cost import estimate_cost
 from app.memory import stages
 from app.rag import citations as citations_mod
 from app.rag import compression as compression_mod
-from app.rag import context, observability, prompt, refusal
+from app.rag import context, observability, prompt, refusal, trace
 from app.rag import errors as errors_mod
 from app.rag import flags as flags_mod
 from app.rag import hybrid as hybrid_mod
@@ -200,6 +200,8 @@ async def _pipeline_events(
     # F5: reflect the request/eval hybrid toggle onto settings before retrieval, so the F3→F5 seam
     # (`retriever.retrieve`, which reads the mode from settings) honours `flags.hybrid` (AC-12).
     settings = flags_mod.apply_flags(settings, flags)
+    # Install this request's trace before any seam runs; `stages.emit` drains it per stage.
+    trace.start(settings)
 
     # F9: cache lookup, between rewrite and retrieval (CLAUDE.md pipeline order). Everything is
     # gated on ENABLE_CACHE: flag off emits no `cache_lookup` stage and leaves `rr`/`query_vec`
@@ -212,6 +214,13 @@ async def _pipeline_events(
         hit, rr, normalized, query_vec, lookup_ms = await _cache_lookup(
             query, memory, settings, sessionmaker
         )
+        # `query_vec is None` means the exact-match Redis tier answered before any embed ran.
+        trace.record("cache_lookup", {
+            "hit": hit is not None,
+            "tier": "redis_exact" if query_vec is None else "semantic",
+            "key": trace.clip(normalized),
+            "n_entries": len(cache_store._CACHE._ids),
+        })
         yield stages.emit("cache_lookup", "done", ms=lookup_ms)
         _log_cache_outcome(hit, "redis" if query_vec is None else "semantic", lookup_ms, settings)
         if hit is not None:
@@ -347,6 +356,14 @@ async def _pipeline_events(
     except Exception as exc:
         yield SSEEvent(event="error", data={"message": str(exc)})
         return
+    # The context the answer was actually written from — the end of the funnel the earlier stages
+    # narrowed, and what every `[n]` in the answer points at.
+    trace.record("generating", {
+        "model": settings.LLM_MODEL,
+        "tokens_out": tokens_out,
+        "memory_used": bool(memory_block),
+        "context": trace.chunk_rows(chunks, "rerank_score"),
+    })
     yield stages.emit("generating", "done", ms=gen_timer.ms())
 
     full_prompt = (prompt.SYSTEM_PROMPT + language_directive + context.format_context(chunks)

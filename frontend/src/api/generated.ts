@@ -293,11 +293,7 @@ export interface components {
              * Skip Cache
              * @default false
              */
-            skip_cache: boolean;
-            /** Flags Override */
-            flags_override?: {
-                [key: string]: boolean;
-            } | null;
+            skip_cache?: boolean;
         };
         /** Body_token_api_auth_token_post */
         Body_token_api_auth_token_post: {

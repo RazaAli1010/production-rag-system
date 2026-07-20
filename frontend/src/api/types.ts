@@ -65,10 +65,66 @@ export type StageName =
   | "summarizing_memory"
   | (string & {});
 
+/** One retrieved passage as the trace shows it (`rag/trace.py:chunk_row`) — clipped server-side. */
+export interface TraceChunk {
+  chunk_id: string;
+  title: string;
+  section: string | null;
+  page: number | null;
+  text: string;
+  score?: number | null;
+  /** Rerank only: old rank − new rank. Positive = the cross-encoder promoted this passage. */
+  moved?: number;
+}
+
+/**
+ * Per-stage intermediate output (`ENABLE_TRACE`), on `done` frames only. Every field is optional
+ * because which ones are populated depends on the stage — a `searching` detail has `runs`, a
+ * `compressing` detail has `dropped`. Absent entirely when tracing is off, so every consumer must
+ * treat it as missing rather than empty.
+ */
+export interface StageDetail {
+  // searching (one entry per query-rewrite fan-out query)
+  runs?: { query: string; dense: TraceChunk[]; sparse: TraceChunk[]; fused: TraceChunk[]; degraded: boolean }[];
+  // rewriting
+  original?: string;
+  normalized?: string;
+  variants?: string[];
+  language?: string | null;
+  failed?: boolean;
+  // reranking
+  before?: TraceChunk[];
+  after?: TraceChunk[];
+  n_candidates?: number;
+  kept?: number;
+  // compressing
+  tokens_before?: number;
+  tokens_after?: number;
+  chunks_before?: number;
+  chunks_after?: number;
+  sentences_dropped?: number;
+  dropped?: TraceChunk[];
+  trimmed?: { chunk_id: string; title: string; tokens_before: number; tokens_after: number; text_after: string }[];
+  // cache_lookup
+  hit?: boolean;
+  tier?: string;
+  key?: string;
+  n_entries?: number;
+  // generating
+  model?: string;
+  tokens_out?: number;
+  memory_used?: boolean;
+  context?: TraceChunk[];
+  // summarizing_memory
+  pairs_folded?: number;
+  summary?: string;
+}
+
 export interface StageEvent {
   stage: StageName;
   status: "started" | "done" | "skipped";
   ms: number | null;
+  detail?: StageDetail | null;
 }
 
 export interface PipelineFlags {

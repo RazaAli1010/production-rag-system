@@ -101,6 +101,11 @@ class StageEvent(BaseModel):
     stage: str
     status: Literal["started", "done", "skipped"]
     ms: int | None = None
+    # The stage's intermediate output (see `rag/trace.py`) — what it actually retrieved, reordered
+    # or discarded, so the pipeline can be inspected rather than inferred from timings. Present on
+    # `done` frames only, and only while `ENABLE_TRACE` is on. Additive with a default, same
+    # discipline as `AnswerResponse.degraded`: every existing producer and consumer is unchanged.
+    detail: dict | None = None
 
 
 class PipelineFlags(BaseModel):

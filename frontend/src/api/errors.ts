@@ -6,8 +6,7 @@
  *   1. F11's registered handlers (422/429/503/504/500) return the envelope
  *      `{"error": {"type", "message", "request_id", "detail"?}}` — see backend/app/core/errors.py.
  *   2. Raw `HTTPException`s bypass those handlers and return FastAPI's default `{"detail": "..."}`.
- *      This is how 403 (flags_override), 404 (session not found) and — the one that matters —
- *      409 `session_busy` arrive.
+ *      This is how 404 (session not found) and — the one that matters — 409 `session_busy` arrive.
  *
  * Everything downstream consumes `ApiError` and never sees which dialect it came from.
  */
