@@ -7,7 +7,6 @@ check must never make a billable call.
 """
 
 import asyncio
-import functools
 
 import anyio
 import structlog
@@ -19,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.caching import redis_hot
 from app.core.settings import settings
 from app.db.session import get_session
+from app.indexing.vectorstore import _client_and_host
 
 logger = structlog.get_logger(__name__)
 
@@ -41,18 +41,10 @@ async def _redis() -> str:
     return "ok"
 
 
-@functools.lru_cache(maxsize=1)
-def _pc():
-    # Cached so probes reuse one warm connection; a fresh client per health check re-pays the
-    # handshake every time and lands right on the probe timeout.
-    from pinecone import Pinecone
-
-    return Pinecone(api_key=settings.PINECONE_API_KEY.get_secret_value())
-
-
 def _pinecone_sync() -> None:
     # Sync client — validates key + index existence in one network call; runs off the loop.
-    _pc().describe_index(settings.PINECONE_INDEX)
+    # Shares the retrieval path's cache, so probe and hot path warm ONE client between them.
+    _client_and_host(settings.PINECONE_API_KEY.get_secret_value(), settings.PINECONE_INDEX)
 
 
 async def _pinecone() -> str:

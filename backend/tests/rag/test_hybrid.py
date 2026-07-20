@@ -117,6 +117,14 @@ class _FakeIndex:
         return _FakeFetchResponse(vectors)
 
 
+def _awaitable(value):
+    # `get_index` is async (it runs the blocking Pinecone handshake off the loop).
+    async def _stub(*_a, **_kw):
+        return value
+
+    return _stub
+
+
 def _md(doc_id, text="chunk text", **o):
     return {"doc_id": doc_id, "title": "T", "text": text, "section_heading": "",
             "page_start": -1, "page_end": -1, "anchor": "", "token_count": 3, **o}
@@ -124,7 +132,7 @@ def _md(doc_id, text="chunk text", **o):
 
 async def test_hydrate_sparse_only_builds_chunks_from_metadata(monkeypatch):
     index = _FakeIndex({"pu": {"a:0": _md("pu-doc", page_start=5, page_end=5)}})
-    monkeypatch.setattr(hybrid, "get_index", lambda s: index)
+    monkeypatch.setattr(hybrid, "get_index", _awaitable(index))
 
     hydrated = await hybrid.hydrate_sparse_only(["a:0"], "pu", _settings())
     assert set(hydrated) == {"a:0"}
@@ -135,7 +143,7 @@ async def test_hydrate_sparse_only_builds_chunks_from_metadata(monkeypatch):
 
 async def test_hydrate_sparse_only_drops_ids_absent_from_namespace(monkeypatch):
     index = _FakeIndex({"pu": {"a:0": _md("pu-doc")}})  # "b:0" lives nowhere in pu
-    monkeypatch.setattr(hybrid, "get_index", lambda s: index)
+    monkeypatch.setattr(hybrid, "get_index", _awaitable(index))
 
     hydrated = await hybrid.hydrate_sparse_only(["a:0", "b:0"], "pu", _settings())
     assert set(hydrated) == {"a:0"}  # absent id dropped, not raised (AC-4)
@@ -143,7 +151,7 @@ async def test_hydrate_sparse_only_drops_ids_absent_from_namespace(monkeypatch):
 
 async def test_hydrate_sparse_only_merges_across_namespaces_when_none(monkeypatch):
     index = _FakeIndex({"pu": {"a:0": _md("pu-doc")}, "hec": {"b:0": _md("hec-doc")}})
-    monkeypatch.setattr(hybrid, "get_index", lambda s: index)
+    monkeypatch.setattr(hybrid, "get_index", _awaitable(index))
     settings = _settings(RETRIEVAL_NAMESPACES=["pu", "hec"])
 
     hydrated = await hybrid.hydrate_sparse_only(["a:0", "b:0"], None, settings)
@@ -158,14 +166,14 @@ async def test_hydrate_sparse_only_swallows_fetch_failure(monkeypatch):
         async def fetch(self, ids, namespace=None):
             raise RuntimeError("pinecone unreachable")
 
-    monkeypatch.setattr(hybrid, "get_index", lambda s: _FailingIndex())
+    monkeypatch.setattr(hybrid, "get_index", _awaitable(_FailingIndex()))
     hydrated = await hybrid.hydrate_sparse_only(["a:0"], "pu", _settings())
     assert hydrated == {}  # swallowed, no raise
 
 
 async def test_hydrate_sparse_only_empty_ids_makes_no_fetch(monkeypatch):
     index = _FakeIndex({})
-    monkeypatch.setattr(hybrid, "get_index", lambda s: index)
+    monkeypatch.setattr(hybrid, "get_index", _awaitable(index))
     assert await hybrid.hydrate_sparse_only([], None, _settings()) == {}
     assert index.calls == []  # already-dense ids never re-fetched
 

@@ -27,11 +27,11 @@ def _build_embeddings(settings):
     )
 
 
-def _build_store(settings):
+async def _build_store(settings):
     from langchain_pinecone import PineconeVectorStore
 
     return PineconeVectorStore(
-        index=get_index(settings), embedding=_build_embeddings(settings), text_key="text"
+        index=await get_index(settings), embedding=_build_embeddings(settings), text_key="text"
     )
 
 
@@ -78,7 +78,7 @@ async def _retrieve_namespace(
 ) -> list[RetrievedChunk]:
     """`query_vec=None` takes the by-query surface (embeds internally) — byte-for-byte the
     pre-F9 path. When F9 supplies a vector, the by-vector surface skips the redundant embed."""
-    store = _build_store(settings)
+    store = await _build_store(settings)
     if query_vec is not None:
         pairs = await store.asimilarity_search_by_vector_with_score(
             query_vec, k=k, namespace=namespace

@@ -83,7 +83,7 @@ async def main(argv=None, settings=None, index=None, embeddings=None):
     await guard_strategy(strategy, args.wipe, settings)
 
     if index is None:
-        index = get_index(settings)
+        index = await get_index(settings)
     if embeddings is None:
         from langchain_openai import OpenAIEmbeddings
         embeddings = OpenAIEmbeddings(model=settings.EMBED_MODEL,

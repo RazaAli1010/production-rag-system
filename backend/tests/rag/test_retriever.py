@@ -39,9 +39,17 @@ class FakeStore:
         return pairs[:k]
 
 
+def _awaitable(value):
+    # `_build_store` is async (it awaits `get_index`, which runs the Pinecone handshake off-loop).
+    async def _stub(*_a, **_kw):
+        return value
+
+    return _stub
+
+
 async def test_single_namespace_returns_dense_score_only(monkeypatch):
     store = FakeStore({"pu": [(_doc("d:0"), 0.9), (_doc("d:1"), 0.8)]})
-    monkeypatch.setattr(retriever, "_build_store", lambda settings: store)
+    monkeypatch.setattr(retriever, "_build_store", _awaitable(store))
 
     chunks = await retriever.retrieve("q", k=5, namespace="pu", settings=_settings())
 
@@ -57,7 +65,7 @@ async def test_namespace_none_fans_out_and_merges_by_score(monkeypatch):
         "pu": [(_doc("pu:0", doc_id="pu-doc"), 0.95), (_doc("pu:1", doc_id="pu-doc"), 0.5)],
         "hec": [(_doc("hec:0", doc_id="hec-doc"), 0.7), (_doc("hec:1", doc_id="hec-doc"), 0.6)],
     })
-    monkeypatch.setattr(retriever, "_build_store", lambda settings: store)
+    monkeypatch.setattr(retriever, "_build_store", _awaitable(store))
     settings = _settings(RETRIEVAL_NAMESPACES=["pu", "hec"])
 
     chunks = await retriever.retrieve("q", k=3, namespace=None, settings=settings)
@@ -74,7 +82,7 @@ async def test_namespace_error_surfaces_not_silently_dropped(monkeypatch):
             return await super().asimilarity_search_with_score(query, k, namespace)
 
     store = FailingStore({"pu": [(_doc("pu:0"), 0.9)]})
-    monkeypatch.setattr(retriever, "_build_store", lambda settings: store)
+    monkeypatch.setattr(retriever, "_build_store", _awaitable(store))
     settings = _settings(RETRIEVAL_NAMESPACES=["pu", "hec"])
 
     with pytest.raises(RuntimeError, match="hec namespace unavailable"):
@@ -98,7 +106,7 @@ async def test_gather_candidate_pool_matches_retrieve_when_rerank_off(monkeypatc
     # F7 refactor regression: retrieve() == gather_candidate_pool()[:k] on the dense_only path with
     # rerank off (byte-for-byte f6-rerank-after — the pool-gathering was factored out unchanged).
     store = FakeStore({"pu": [(_doc("d:0"), 0.9), (_doc("d:1"), 0.8), (_doc("d:2"), 0.7)]})
-    monkeypatch.setattr(retriever, "_build_store", lambda settings: store)
+    monkeypatch.setattr(retriever, "_build_store", _awaitable(store))
     settings = _settings()
 
     pool = await retriever.gather_candidate_pool("q", k=2, namespace="pu", settings=settings)

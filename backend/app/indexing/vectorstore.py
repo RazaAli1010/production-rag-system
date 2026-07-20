@@ -1,6 +1,8 @@
 import asyncio
+import functools
 import json
 
+import anyio
 import structlog
 import tenacity
 from sqlalchemy import delete, func, select
@@ -65,9 +67,23 @@ async def wipe_namespace(index, session, namespace, settings):
     logger.warning("indexing.wipe", namespace=namespace)
 
 
-def get_index(settings):
+@functools.lru_cache(maxsize=1)
+def _client_and_host(api_key: str, index_name: str):
+    # `describe_index` is a BLOCKING network call. Cached so the ~2s handshake is paid once per
+    # process, not once per namespace per request — and keyed by primitives so lru_cache can hash
+    # it. Exceptions aren't cached, so a genuinely-down Pinecone still re-probes per request.
     from pinecone import Pinecone
 
-    pc = Pinecone(api_key=settings.PINECONE_API_KEY.get_secret_value())
-    host = pc.describe_index(settings.PINECONE_INDEX).host
-    return pc.IndexAsyncio(host=host)
+    pc = Pinecone(api_key=api_key)
+    return pc, pc.describe_index(index_name).host
+
+
+async def get_index(settings):
+    # Off the loop: a blocking call here stops `asyncio.timeout` in the /api/ask handler from ever
+    # being scheduled, so the request budget isn't enforced while Pinecone is slow.
+    pc, host = await anyio.to_thread.run_sync(
+        _client_and_host,
+        settings.PINECONE_API_KEY.get_secret_value(),
+        settings.PINECONE_INDEX,
+    )
+    return pc.IndexAsyncio(host=host)  # local construction, no network

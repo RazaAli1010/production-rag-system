@@ -16,15 +16,34 @@ from app.core.middleware import RequestContextMiddleware
 from app.core.ratelimit import RateLimited
 from app.core.settings import settings
 from app.observability.logging import configure_logging
+from app.rag import rerank
 from app.rag.errors import ProviderError
 
 logger = structlog.get_logger(__name__)
 
 
+async def _warm_rerank() -> None:
+    # ~19s cold vs ~2.7s warm (measured): paid by the first request, it alone exceeded
+    # REQUEST_TIMEOUT_S and timed the turn out. `get_rerank_model` is lock-guarded, so a request
+    # arriving mid-load waits on this same load rather than starting a second one.
+    try:
+        await rerank.warm_rerank_model(settings)
+        logger.info("startup.rerank_warm")
+    except Exception as exc:  # noqa: BLE001 — warmup is an optimization, never a boot requirement
+        logger.warning("startup.rerank_warm_failed", error=str(exc))
+
+
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     configure_logging(settings)  # F13: the one structlog.configure, JSON logs + request_id (AC-7)
+    # Backgrounded, not awaited: blocking boot on the weight load would delay readiness and risk
+    # the platform's health-check window. Held in a local so the task isn't GC'd mid-flight.
+    warm_task = asyncio.create_task(_warm_rerank()) if settings.ENABLE_RERANK else None
     yield
+    if warm_task is not None:
+        warm_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await warm_task
     # Drop the pooled redis.asyncio clients (limiter + F9 cache share them) on shutdown.
     await redis_hot.close()
 

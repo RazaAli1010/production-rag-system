@@ -57,7 +57,11 @@ class FakeStore:
 @pytest.fixture
 def fake_store(monkeypatch):
     store = FakeStore()
-    monkeypatch.setattr(retriever, "_build_store", lambda settings: store)
+
+    async def _build_store(*_a, **_kw):  # async: it awaits the off-loop `get_index`
+        return store
+
+    monkeypatch.setattr(retriever, "_build_store", _build_store)
     return store
 
 

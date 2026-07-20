@@ -118,7 +118,7 @@ async def hydrate_sparse_only(
     nothing else), never an unhandled raise past the seam."""
     if not ids:
         return {}
-    index = get_index(settings)
+    index = await get_index(settings)
     namespaces = [namespace] if namespace is not None else list(settings.RETRIEVAL_NAMESPACES)
     responses = await asyncio.gather(
         *(index.fetch(ids=ids, namespace=ns) for ns in namespaces), return_exceptions=True
