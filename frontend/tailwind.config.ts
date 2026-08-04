@@ -43,9 +43,22 @@ export default {
           "0%": { opacity: "0", transform: "scale(1.04)" },
           "100%": { opacity: "1", transform: "scale(1)" },
         },
+        // The pending mark: a seal die turning in its housing, one detent at a time.
+        "seal-spin": {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(360deg)" },
+        },
+        // ...with the ink going wet and dry between detents. Rests at full opacity so the
+        // prefers-reduced-motion clamp (tokens.css) leaves a solid stamp, not a faded one.
+        "ink-breathe": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.45" },
+        },
       },
       animation: {
         press: "press 120ms ease-out",
+        "seal-spin": "seal-spin 2s steps(8, end) infinite",
+        "ink-breathe": "ink-breathe 2s ease-in-out infinite",
       },
     },
   },

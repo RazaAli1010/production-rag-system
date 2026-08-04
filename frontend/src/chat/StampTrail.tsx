@@ -6,9 +6,10 @@ import { hasDetail, StageDetailView } from "./StageDetail";
 /**
  * T9 — the signature element (AC-3, AC-4, AC-5, AC-40, AC-43).
  *
- * Each stage is a stamp impression: violet ink on paper, alternating a fraction of a degree so the
- * trail reads as pressed rather than typeset. This is the one place the design spends its boldness;
- * everything around it stays flat and quiet.
+ * Each stage is a stamp impression: violet ink on paper. The stamps themselves sit square — they
+ * used to alternate a fraction of a degree, but across a full-width row that tilt swings the
+ * right-hand `ms` column a couple of pixels each way and the trail reads as misaligned rather than
+ * pressed. The tilt survives on the collapsed WorkedChip, which is small enough to carry it.
  *
  * The trail is ordered and connected because the pipeline genuinely IS a sequence — order carries
  * meaning here, which is exactly the test for whether a structural device belongs.
@@ -51,7 +52,6 @@ function Stamp({ stage, live }: { stage: TrailStage; live: boolean }) {
           ? "border-rule/60 bg-transparent text-ink-muted opacity-40"
           : "border-stamp/40 bg-stamp/[0.07] text-ink",
       ].join(" ")}
-      style={{ transform: `rotate(${stage.stage.length % 2 === 0 ? "-0.6deg" : "0.6deg"})` }}
     >
       {/* A stage with a trace becomes a button; one without stays inert text rather than a control
           that looks clickable and does nothing. */}
