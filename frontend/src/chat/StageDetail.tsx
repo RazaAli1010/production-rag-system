@@ -59,14 +59,19 @@ function Column({ title, chunks }: { title: string; chunks?: TraceChunk[] }) {
   );
 }
 
+/**
+ * Label and value in two fixed columns — inline labels of different lengths (RESULT / KEY / CACHED)
+ * start every value at a different x and the block reads ragged. The column is wide enough for the
+ * longest label in use (LANGUAGE) at this size.
+ */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <p className="text-[12px] text-ink">
+    <div className="grid grid-cols-[5.5rem_1fr] items-baseline gap-x-2 text-[12px] text-ink">
       <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-muted">
-        {label}{" "}
+        {label}
       </span>
-      {children}
-    </p>
+      <span className="min-w-0">{children}</span>
+    </div>
   );
 }
 
