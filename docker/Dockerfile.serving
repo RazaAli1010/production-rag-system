@@ -1,0 +1,92 @@
+# CampusRAG serving image (F15).
+#
+# Build context is the REPO ROOT:
+#   docker build -f docker/Dockerfile.serving --build-arg APP_VERSION=$(git rev-parse --short HEAD) .
+# or just `make image`, which also checks the bm25.pkl precondition first.
+#
+# Budget: <2.5GB. The whole budget is one decision — torch from the CPU index (~200MB) instead of
+# PyPI's default CUDA build (~2.5GB on its own). See the `torch` step below.
+
+# ---------------------------------------------------------------- builder ----
+FROM python:3.11-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1
+
+# build-essential is needed by a few sdists and is NOT carried into the runtime stage.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# A venv rather than `pip install --prefix`: with --prefix, pip does not put the target on
+# sys.path, so the project install below would not see torch as already satisfied and would
+# happily pull the CUDA wheel from PyPI — silently blowing the size budget. The venv is also a
+# single self-contained directory to copy into the runtime stage.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /build
+COPY backend/pyproject.toml ./
+COPY backend/app ./app
+
+# torch FIRST, from the PyTorch CPU index, so the CUDA wheel is never even downloaded. The version
+# is read out of pyproject.toml rather than repeated here — a second hardcoded pin would drift
+# silently and the failure (a 2.5GB image, or a resolver conflict) shows up only at build time.
+RUN TORCH_PIN=$(grep -oE '"torch==[^"]+"' pyproject.toml | tr -d '"') \
+    && test -n "$TORCH_PIN" || (echo "no torch pin found in pyproject.toml" >&2; exit 1) \
+    && pip install --index-url https://download.pytorch.org/whl/cpu "$TORCH_PIN"
+
+# Runtime deps only — no `[dev]`, so ruff/pytest/mypy/locust never ship. torch is already
+# satisfied in the venv, so this does not reach for the CUDA build.
+RUN pip install .
+
+# ---------------------------------------------------------------- weights ----
+# Bake the cross-encoder into the image so the first request never reaches huggingface.co.
+# HF_HUB_OFFLINE is deliberately NOT set in this stage — it would block the download this stage
+# exists to perform.
+FROM builder AS weights
+ENV HF_HOME=/hf
+RUN python -c "from sentence_transformers import CrossEncoder; \
+    CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+
+# ---------------------------------------------------------------- runtime ----
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    HF_HOME=/hf \
+    HF_HUB_OFFLINE=1
+
+RUN useradd -m -u 10001 app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=weights --chown=app:app /hf /hf
+
+WORKDIR /app
+COPY backend/alembic.ini ./
+COPY backend/app ./app
+
+# Release-matched BM25 index. `/api/health` counts a missing bm25.pkl as a CORE dependency being
+# down, so an image built without it boots straight into 503 and Render never routes traffic to
+# it. Failing the BUILD is strictly better than shipping that. The artifact is git-ignored
+# (it is rebuilt from the corpus every release), so CI's `index` job produces it and drops it
+# here; locally, `make bm25`.
+COPY docker/bm25.pkl ./app/data/bm25.pkl
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
+USER app
+EXPOSE 8000
+
+# Liveness, NOT /api/health: the deep probe 503s when Redis or Pinecone blips, and Redis is
+# fail-open in the pipeline — restarting on it would kill an API that still answers every
+# question, then re-pay the ~19s rerank warmup. stdlib urllib, so no curl package.
+# start-period covers boot + `alembic upgrade head`.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD python -c "import sys,urllib.request; \
+sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health/live',timeout=4).status==200 else 1)"
+
+ENTRYPOINT ["entrypoint.sh"]

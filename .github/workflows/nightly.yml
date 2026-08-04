@@ -1,0 +1,144 @@
+name: Nightly retrieval smoke
+
+# Stretch (F15 AC-33/34). A 10-question F4 retrieval run against the live index, to catch the
+# failure mode no unit test can: the corpus, the Pinecone namespace or the embedding model drifting
+# out from under a codebase that still passes every test.
+#
+# It deliberately writes NO label into docs/eval_results/ — the fixed label sequence
+# (baseline → … → f17-memory-after) is owned by the manual eval gates, and a nightly job silently
+# appending to it would make every published benchmark unreproducible.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"     # 02:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: F4 retrieval smoke (10 questions)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+      PINECONE_INDEX: ${{ secrets.PINECONE_INDEX }}
+      # The eval set is Urdu/English code-switched; without this, structlog crashes on a
+      # cp1252-style default encoding partway through the run.
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      # A fork, or this repo before the secrets are configured, must get a green SKIP rather than
+      # a red X every single night — a permanently-red scheduled job is a job everyone learns to
+      # ignore, which is worse than not having one.
+      - id: gate
+        run: |
+          if [ -n "${{ secrets.OPENAI_API_KEY }}" ] && [ -n "${{ secrets.PINECONE_API_KEY }}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::eval secrets not configured — skipping the nightly smoke run"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.ok == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        if: steps.gate.outputs.ok == 'true'
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Migrate
+        if: steps.gate.outputs.ok == 'true'
+        working-directory: backend
+        run: alembic upgrade head
+
+      # Retrieval suite only — no RAGAS judge, so a nightly run costs a few embedding calls rather
+      # than a judge bill. That is also why there is no 10-question cap: the brief suggested one to
+      # bound cost, but the full 75-record set is already cents, and a fixed subset would only
+      # measure the ten questions someone happened to pick.
+      #
+      # Flags are passed explicitly. The Settings defaults are all-off (so every eval label stays
+      # reproducible from a bare checkout), which would silently measure the F3 baseline instead of
+      # the deployed posture.
+      #
+      # EVAL_RESULTS_DIR is redirected to a temp dir: the fixed label sequence lives in
+      # docs/eval_results/ and a nightly job appending to it would make published benchmarks
+      # unreproducible (AC-34).
+      - name: Retrieval smoke
+        if: steps.gate.outputs.ok == 'true'
+        working-directory: backend
+        env:
+          EVAL_RESULTS_DIR: /tmp/nightly-eval
+        run: |
+          mkdir -p /tmp/nightly-eval
+          python -m app.evals.run --suite retrieval --flags hybrid=on,rerank=on \
+            --label nightly-smoke
+
+      # `--compare` reads the previous label from the DATABASE, and this job's Postgres is a fresh
+      # service container with no eval history — so the check is against a committed floor file.
+      # Update docs/eval_results/nightly_floor.json whenever a gate legitimately moves the numbers.
+      - name: Check against the committed floor
+        if: steps.gate.outputs.ok == 'true'
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import json, pathlib, re, sys
+          floor = json.loads(pathlib.Path("../docs/eval_results/nightly_floor.json").read_text())
+          report = pathlib.Path("/tmp/nightly-eval/nightly-smoke.md")
+          if not report.exists():
+              sys.exit(f"no report written at {report} — the run did not complete")
+          text = report.read_text(encoding="utf-8", errors="replace")
+          failures = []
+          for metric, minimum in floor.items():
+              # Report rows look like: `| hit@5 | overall | 0.9683 |`
+              m = re.search(rf"^\|\s*{re.escape(metric)}\s*\|\s*overall\s*\|\s*([0-9.]+)\s*\|",
+                            text, re.MULTILINE)
+              if not m:
+                  failures.append(f"{metric}: no `overall` row in the report")
+                  continue
+              value = float(m.group(1))
+              print(f"{metric}: {value} (floor {minimum})")
+              if value < minimum:
+                  failures.append(f"{metric}: {value} < floor {minimum}")
+          if failures:
+              print("REGRESSION:\n" + "\n".join(failures))
+              sys.exit(1)
+          PY
+
+      - name: Open an issue on regression
+        if: failure() && steps.gate.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Nightly retrieval smoke regressed ($(date -u +%Y-%m-%d))" \
+            --body "The 10-question retrieval smoke fell below the committed floor in \
+          docs/eval_results/nightly_floor.json. Run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --label "eval-regression"

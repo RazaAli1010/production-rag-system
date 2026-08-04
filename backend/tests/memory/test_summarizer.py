@@ -1,4 +1,5 @@
-"""T4 — summariser folds old+pending only, never the transcript (AC-24); errors propagate (AC-27)."""
+"""T4 — summariser folds old+pending only, never the transcript (AC-24); errors propagate
+(AC-27)."""
 
 import pytest
 

@@ -26,7 +26,9 @@ async def call_with_retry(fn, *args, settings, **kwargs):
     A non-retryable exception (e.g. 400) propagates immediately, unwrapped, on the first try."""
     try:
         async for attempt in tenacity.AsyncRetrying(
-            retry=tenacity.retry_if_exception(is_retryable),
+            # tenacity types the predicate as Callable[[BaseException], bool]; `is_retryable`
+            # takes Exception, which is the narrower and correct domain here.
+            retry=tenacity.retry_if_exception(is_retryable),  # type: ignore[arg-type]
             wait=tenacity.wait_exponential(min=1, max=30),
             stop=tenacity.stop_after_attempt(settings.LLM_MAX_RETRIES + 1),
             reraise=True,

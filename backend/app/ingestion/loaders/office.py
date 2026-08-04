@@ -60,15 +60,16 @@ def _load_docx_sync(path: Path, doc_id: str) -> list[Document]:
             current_heading, current_anchor = text, anchor
             continue
 
-        anchor = current_anchor
-        if anchor is None:
+        para_anchor = current_anchor
+        if para_anchor is None:
             pre_heading_index += 1
-            anchor = f"para-{pre_heading_index}"
+            para_anchor = f"para-{pre_heading_index}"
 
         blocks.append(
             Document(
                 page_content=text,
-                metadata={"doc_id": doc_id, "anchor": anchor, "section_heading": current_heading},
+                metadata={"doc_id": doc_id, "anchor": para_anchor,
+                          "section_heading": current_heading},
             )
         )
     return blocks

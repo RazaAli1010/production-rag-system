@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select, update
@@ -42,7 +42,7 @@ async def test_prune_deletes_expired_and_keeps_live(user, sessionmaker_, auth_se
         await service.authenticate(s, EMAIL, PW, settings=auth_settings)
 
     # age one refresh token past expiry and one attempt out of the lockout window
-    stale = datetime.now(timezone.utc) - timedelta(days=1)
+    stale = datetime.now(UTC) - timedelta(days=1)
     async with sessionmaker_() as s:
         first = (await s.scalars(select(RefreshToken).order_by(RefreshToken.issued_at))).first()
         await s.execute(
@@ -87,7 +87,8 @@ async def test_issue_key_for_an_unknown_user_returns_1(sessionmaker_, auth_setti
 
 
 async def test_revoke_key(user, sessionmaker_, auth_settings, session, capsys):
-    await _run(["--issue-key", "--email", EMAIL, "--label", "telegram"], sessionmaker_, auth_settings)
+    await _run(["--issue-key", "--email", EMAIL, "--label", "telegram"], sessionmaker_,
+               auth_settings)
     raw = capsys.readouterr().out.strip().splitlines()[-1]
 
     assert await _run(["--revoke-key", "--label", "telegram"], sessionmaker_, auth_settings) == 0

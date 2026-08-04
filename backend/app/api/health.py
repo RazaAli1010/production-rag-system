@@ -87,3 +87,19 @@ async def health(session: AsyncSession = Depends(get_session)) -> JSONResponse:
         logger.warning("api.health_degraded", **deps)
     return JSONResponse({"status": "ok" if core_ok else "degraded", "dependencies": deps},
                         status_code=status_code)
+
+
+@router.get("/health/live", summary="Liveness (touches no dependency)",
+            description="200 whenever the process is up. This is the probe for the container "
+                        "HEALTHCHECK and the hosting platform; /api/health is the deep readiness "
+                        "probe for humans and monitoring.")
+async def live() -> dict[str, str]:
+    """F15: separate from /api/health *because* /api/health 503s on any core dependency.
+
+    Redis is fail-open in the pipeline (`redis_hot` short-circuits to a miss), so pointing a
+    restart-on-failure platform probe at the deep check means an Upstash blip restarts an API that
+    can still answer every question — and the restart re-pays the ~19s rerank warmup. The two
+    probes answer different questions: this one "is the process alive" (→ restart), the other
+    "can it serve well" (→ page a human).
+    """
+    return {"status": "live", "version": settings.APP_VERSION}

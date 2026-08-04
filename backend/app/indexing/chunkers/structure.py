@@ -34,7 +34,7 @@ class StructureChunker:
         return self._emit(self._merge_forward(sections), doc_id)
 
     def _by_heading(self, docs):
-        sections = []
+        sections: list[_Section] = []
         for d in docs:
             md = d.metadata
             heading = md.get("section_heading")
@@ -46,7 +46,7 @@ class StructureChunker:
         return sections
 
     def _by_anchor(self, docs):
-        sections = []
+        sections: list[_Section] = []
         for d in docs:
             md = d.metadata
             anchor = md.get("anchor")
@@ -106,10 +106,11 @@ class StructureChunker:
         section boundary can cite a heading its tail text sits under. The page range still spans
         correctly. Split on heading change instead if citation headings need to be exact.
         """
-        packed = []
+        packed: list[_Section] = []
         for sec in sections:
             prev = packed[-1] if packed else None
-            if prev and count_tokens(prev.text) + count_tokens(sec.text) <= self.settings.FIXED_CHUNK_TOKENS:
+            budget = self.settings.FIXED_CHUNK_TOKENS
+            if prev and count_tokens(prev.text) + count_tokens(sec.text) <= budget:
                 prev.parts = prev.parts + sec.parts
                 prev.page_end = sec.page_end
                 prev.heading = prev.heading or sec.heading

@@ -8,7 +8,7 @@ from app.db.models.chat import Message
 from app.db.models.user import User
 from app.memory import service
 
-_BASE = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+_BASE = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
 
 
 async def _seed_user(session) -> uuid.UUID:
@@ -59,11 +59,12 @@ async def test_title_truncated_to_60(session, memory_settings):
     assert len(s.title) == 60
 
 
-async def test_total_tokens_is_atomic_sum_across_user_and_assistant(session, sessionmaker_, memory_settings):
+async def test_total_tokens_is_atomic_sum_across_user_and_assistant(session, sessionmaker_,
+                                                                    memory_settings):
     """User (request session) + assistant (write-behind session) increment concurrently — the sum
     must be exact, which is why the increments are atomic SQL, not ORM `+=` (AC-13)."""
     s = await _seed_session(session)
-    umsg = await service.persist_user(session, s, "question one", memory_settings)
+    await service.persist_user(session, s, "question one", memory_settings)
     await session.commit()
 
     from app.core.contracts import AnswerResponse, Citation, PipelineFlags
@@ -84,7 +85,8 @@ async def test_total_tokens_is_atomic_sum_across_user_and_assistant(session, ses
         expected = tokens.count("question one") + tokens.count("the answer text [1]")
         assert reloaded.total_tokens == expected
         msgs = await service.get_messages(db, s.id)
-        assert [m.role for m in msgs] == [MessageRole.user, MessageRole.assistant]  # ordering (AC-10)
+        # ordering (AC-10)
+        assert [m.role for m in msgs] == [MessageRole.user, MessageRole.assistant]
         assert msgs[0].created_at < msgs[1].created_at
         assert msgs[1].citations is not None  # citations serialized on assistant turn
 
@@ -101,7 +103,8 @@ async def test_get_owned_refuses_foreign_session(session, memory_settings):
 async def test_get_owned_anon_cannot_read_user_session(session, memory_settings):
     owner = await _seed_user(session)
     s = await _seed_session(session, user_id=owner)
-    assert await service.get_owned(session, s.id, user_id=None) is None  # anon can't take a bound session
+    # anon can't take a bound session
+    assert await service.get_owned(session, s.id, user_id=None) is None
 
 
 async def test_archive_hides_from_list(session, memory_settings):

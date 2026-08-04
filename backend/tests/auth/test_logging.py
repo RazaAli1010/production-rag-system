@@ -35,7 +35,8 @@ async def test_no_secret_reaches_the_logs_across_the_whole_flow(client, logs, se
     rotated = (
         await client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
     ).json()
-    await client.post("/api/auth/logout", headers={"Authorization": f"Bearer {rotated['access_token']}"})
+    await client.post("/api/auth/logout",
+                      headers={"Authorization": f"Bearer {rotated['access_token']}"})
     await client.post("/api/auth/token", data={"username": EMAIL, "password": "wrongpassword"})
 
     hashed = (await session.scalar(select(User).where(User.email == EMAIL))).hashed_password

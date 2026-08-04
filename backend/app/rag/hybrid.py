@@ -170,7 +170,9 @@ def rrf_fuse(
 
     for cid, chunk in fused.items():
         chunk.fused_score = fused_score[cid]
-    ordered = sorted(fused.values(), key=lambda c: c.fused_score, reverse=True)
+    # `or 0.0` — same narrowing as rerank.py: fused_score is Optional on the contract but was
+    # assigned for every element in the loop directly above.
+    ordered = sorted(fused.values(), key=lambda c: c.fused_score or 0.0, reverse=True)
     return ordered[: settings.HYBRID_FUSED_TOP_K]
 
 

@@ -23,7 +23,8 @@ async def _count_logs(session) -> int:
     return (await session.execute(select(func.count()).select_from(RequestLog))).scalar_one()
 
 
-# --------------------------------------------------------------------------- write path + correlation
+# --------------------------------------------------------------------------- write path +
+# correlation
 
 async def test_ask_writes_one_correlated_request_log(client, session, monkeypatch):
     rec = Recorder()
@@ -46,7 +47,8 @@ async def test_ask_writes_one_correlated_request_log(client, session, monkeypatc
 
 
 async def test_write_is_behind_not_on_response_path(client, session, monkeypatch):
-    """The POST returns before the row is committed; it appears only after the task drains (AC-4)."""
+    """The POST returns before the row is committed; it appears only after the task drains
+    (AC-4)."""
     rec = Recorder()
     monkeypatch.setattr(ask_router, "astream", make_fake_astream(rec))
     r = await client.post("/api/ask", json={"question": "a valid question here"},
@@ -141,7 +143,8 @@ async def test_stats_endpoint_requires_admin(client, admin):
                              headers=admin["headers"])).status_code == 422
 
 
-# --------------------------------------------------------------------------- graceful Langfuse (AC-2)
+# --------------------------------------------------------------------------- graceful Langfuse
+# (AC-2)
 
 def test_langfuse_handler_none_when_unconfigured(api_settings):
     from app.rag.observability import langfuse_handler

@@ -5,7 +5,8 @@ DB fixtures mirror `tests/cache/conftest.py` (own `engine`/`session` + the proce
 pytest-asyncio gives each test its own loop). Requires a live Postgres reachable at `DATABASE_URL`.
 
 The summariser LLM (`gpt-4o-mini`) is NEVER real here: tests inject a fake `ChatOpenAI` (F2's
-dependency-injection style), so the suite — and the `memory:` CI job — need no OpenAI key with spend.
+dependency-injection style), so the suite — and the `memory:` CI job — need no OpenAI key with
+spend.
 """
 
 import httpx
@@ -121,7 +122,8 @@ async def _reset_memory_locks():
 @pytest_asyncio.fixture
 async def authed(sessionmaker_, memory_settings):
     """A logged-in student: seeds a user + a live refresh token (the sid `resolve_jwt` checks) and
-    mints a matching access token — no bcrypt, so authed tests stay fast. Returns headers + user_id."""
+    mints a matching access token — no bcrypt, so authed tests stay fast. Returns headers +
+    user_id."""
     import datetime as dt
     import uuid
 
@@ -136,7 +138,7 @@ async def authed(sessionmaker_, memory_settings):
         jti = str(uuid.uuid4())
         db.add(RefreshToken(
             user_id=u.id, jti=jti,
-            expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=7),
+            expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=7),
         ))
         await db.commit()
         token = encode_access(u.id, u.role, jti, settings=memory_settings)

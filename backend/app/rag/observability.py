@@ -34,7 +34,7 @@ def langfuse_handler(session_id: str | None, settings):
         session_id=session_id,
         # F13: env tag + request-id correlation, so one request_id resolves to its trace (AC-1).
         trace_name="ask",
-        tags=[settings.APP_ENV],
+        tags=[settings.APP_ENV, settings.APP_VERSION],  # F15: which release produced this trace
         metadata={"request_id": request_id_var.get()},
     )
 
@@ -72,7 +72,8 @@ def log_compression(
     compression_ms: int,
 ) -> None:
     """F8: record the context-compression metrics (AC-12). Compression adds no OpenAI call — the F6
-    cross-encoder is reused for sentence scoring — so there is no `estimate_cost` site here; the cost
+    cross-encoder is reused for sentence scoring — so there is no `estimate_cost` site here; the
+    cost
     win surfaces as fewer generation input tokens through the existing `log_llm_cost`. Synchronous +
     non-blocking (a structlog emit over a handful of numbers), mirroring `log_rerank`/`log_rewrite`;
     F13 later routes it into `request_logs`/Langfuse without an F8 change."""

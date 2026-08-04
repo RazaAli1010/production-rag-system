@@ -24,5 +24,6 @@ if _MODULE not in sys.modules:
         _stub = types.ModuleType(_MODULE)
         # Placeholder: referenced by ragas.llms.base's MULTIPLE_COMPLETION_SUPPORTED list but never
         # instantiated in an OpenAI-judge run.
-        _stub.ChatVertexAI = type("ChatVertexAI", (), {})
+        # Setting an attribute on a fresh ModuleType is exactly what this shim exists to do.
+        _stub.ChatVertexAI = type("ChatVertexAI", (), {})  # type: ignore[attr-defined]
         sys.modules[_MODULE] = _stub

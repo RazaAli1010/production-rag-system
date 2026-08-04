@@ -7,12 +7,10 @@ contract F17 owns: turn 2's pipeline receives a MemoryContext carrying turn 1's 
 """
 
 import json
-import uuid
 from pathlib import Path
 
 import pytest
 
-import app.db.engine as db_engine
 from app.api import ask
 from app.memory import service
 from app.rag import prompt
@@ -23,7 +21,8 @@ FOLLOWUPS = Path(__file__).resolve().parents[1] / "fixtures" / "memory" / "follo
 
 
 def _load():
-    return [json.loads(line) for line in FOLLOWUPS.read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = FOLLOWUPS.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
 
 
 def test_dataset_has_ten_two_turn_dialogues():

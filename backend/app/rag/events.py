@@ -16,7 +16,10 @@ class SSEEvent(BaseModel):
 
 def stage_event(stage: str, status: str, ms: int | None = None,
                 detail: dict | None = None) -> SSEEvent:
-    data = StageEvent(stage=stage, status=status, ms=ms, detail=detail).model_dump()
+    # `status` is a plain str here by design — every caller passes one of the three literals, and
+    # pydantic validates it. Widening the Literal on the contract would weaken the wire schema.
+    data = StageEvent(stage=stage, status=status,  # type: ignore[arg-type]
+                      ms=ms, detail=detail).model_dump()
     if detail is None:
         # Omitted rather than sent as null, so a frame with nothing to show stays byte-identical to
         # the pre-trace contract — every existing consumer and frame assertion is untouched, and

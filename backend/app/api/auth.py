@@ -13,6 +13,8 @@ from app.auth.schemas import (
     TokenResponse,
     UserOut,
 )
+from app.core import exceptions
+from app.core.exceptions import AuthError
 from app.core.settings import settings
 from app.db.models import User
 from app.db.session import get_session
@@ -94,4 +96,9 @@ async def me(
     principal: Principal = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    return await session.get(User, principal.user_id)
+    user = await session.get(User, principal.user_id)
+    if user is None:
+        # Valid token, deleted account. Previously this returned None and blew up in response
+        # serialisation as a 500; 401 is the honest status and matches every other auth reject.
+        raise AuthError(status=401, detail=exceptions.GENERIC, reason="user_deleted")
+    return user

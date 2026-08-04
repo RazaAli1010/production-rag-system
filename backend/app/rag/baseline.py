@@ -302,7 +302,8 @@ async def _pipeline_events(
             refusal_reason="low_retrieval_confidence",
             pipeline_flags=flags,
             # F17: surfaced from the request (was hardcoded None/False). memory-off callers pass
-            # session_id=None and memory=None, so this stays byte-for-byte f9-cache-after (AC-16/33).
+            # session_id=None and memory=None, so this stays byte-for-byte f9-cache-after
+            # (AC-16/33).
             session_id=session_id,
             memory_summarized=(memory.summarized if memory else False),
             cache_hit=False,

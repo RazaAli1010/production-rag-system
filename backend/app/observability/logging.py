@@ -1,7 +1,8 @@
 """The one `structlog.configure` call (F13, AC-7).
 
 Every feature already emits `logger.info("...", ...)`; nobody configured the renderer. F13 does it
-once at boot so those lines become JSON carrying F11's `request_id` (via `merge_contextvars`) and the
+once at boot so those lines become JSON carrying F11's `request_id` (via `merge_contextvars`)
+and the
 `APP_ENV` tag. `LOG_JSON=false` swaps in the console renderer for readable local dev.
 """
 
@@ -30,4 +31,6 @@ def configure_logging(settings) -> None:
         cache_logger_on_first_use=True,
     )
     # Bind the env tag once so every line carries it (unbound only on interpreter exit).
-    structlog.contextvars.bind_contextvars(env=settings.APP_ENV)
+    # F15 adds `version` (the image's APP_VERSION) alongside it, so a log line or Langfuse trace
+    # resolves to the exact release that produced it.
+    structlog.contextvars.bind_contextvars(env=settings.APP_ENV, version=settings.APP_VERSION)

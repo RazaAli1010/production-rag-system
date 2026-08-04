@@ -47,7 +47,8 @@ async def test_sessions_messages_have_the_columns_f17_uses(engine):
 
 
 async def test_no_pending_or_needs_summarize_column(engine):
-    """The trigger state is derived, not stored — asserting the columns we deliberately did NOT add."""
+    """The trigger state is derived, not stored — asserting the columns we deliberately did NOT
+    add."""
 
     def _columns(sync_conn):
         return {c["name"] for c in inspect(sync_conn).get_columns("sessions")}

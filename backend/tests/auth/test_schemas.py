@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -7,7 +7,6 @@ from pydantic import ValidationError
 from app.auth.schemas import Principal, RegisterRequest, UserOut, password_issues
 from app.db.enums import UserRole
 from app.db.models import User
-
 
 STRONG = "Testpass123"
 
@@ -65,7 +64,7 @@ def test_user_out_cannot_carry_the_hash():
         hashed_password="$2b$12$averysecrethash",
         role=UserRole.student,
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     out = UserOut.model_validate(user)

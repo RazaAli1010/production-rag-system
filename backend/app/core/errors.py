@@ -41,7 +41,7 @@ async def validation_handler(request: Request, exc: RequestValidationError) -> J
     # exc.errors() is safe field-level detail (loc/msg/type), not internal state — attach it under
     # the envelope so a client can see WHICH field failed while the shape stays uniform.
     body = envelope("validation_error", "Invalid request")
-    body["error"]["detail"] = _safe_errors(exc.errors())
+    body["error"]["detail"] = _safe_errors(list(exc.errors()))
     return JSONResponse(body, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 

@@ -62,7 +62,9 @@ async def register(session: AsyncSession, req: RegisterRequest, *, settings) -> 
 
 async def _recent_failures(session: AsyncSession, email: str, *, settings) -> int:
     since = _now() - timedelta(minutes=settings.LOGIN_LOCKOUT_WINDOW_MIN)
-    return await session.scalar(
+    # `or 0`: COUNT() never returns NULL, but scalar() is typed Optional. A None leaking into the
+    # lockout comparison would silently disable the lockout, so make it explicit.
+    count = await session.scalar(
         select(func.count())
         .select_from(LoginAttempt)
         .where(
@@ -71,6 +73,7 @@ async def _recent_failures(session: AsyncSession, email: str, *, settings) -> in
             LoginAttempt.attempted_at > since,
         )
     )
+    return count or 0
 
 
 async def _issue_pair(session: AsyncSession, user: User, *, ip, user_agent, settings):

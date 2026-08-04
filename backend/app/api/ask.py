@@ -198,7 +198,8 @@ class _LogCtx:
     query_hash: str
 
 
-def _emit_request_log(ctx: _LogCtx, meta: dict | None, http_status: int, error_type: str | None) -> None:
+def _emit_request_log(ctx: _LogCtx, meta: dict | None, http_status: int,
+                      error_type: str | None) -> None:
     """Fire the one write-behind `request_logs` row for this ask (F13, AC-3/4). `meta is None` on a
     hard error before the pipeline emitted `meta` — build_row fills telemetry defaults so the row
     still counts toward error_rate. Runs while the request context (and its metrics accumulator) is
@@ -220,7 +221,10 @@ async def _sse_stream(
     meta = None
     http_status, error_type = 200, None
     try:
-        async with aclosing(gen):
+        # aclosing() is typed for AsyncGenerator; `gen` is annotated AsyncIterator, which is
+        # the right contract for the seam (a caller may hand us any async iterable). The
+        # generators actually passed do have aclose(), which is why this is safe.
+        async with aclosing(gen):  # type: ignore[type-var]
             async with asyncio.timeout(settings.REQUEST_TIMEOUT_S):
                 async for ev in gen:
                     if ev.event == "meta":
@@ -247,7 +251,10 @@ async def _collect(
     meta = None
     http_status, error_type = 200, None
     try:
-        async with aclosing(gen):
+        # aclosing() is typed for AsyncGenerator; `gen` is annotated AsyncIterator, which is
+        # the right contract for the seam (a caller may hand us any async iterable). The
+        # generators actually passed do have aclose(), which is why this is safe.
+        async with aclosing(gen):  # type: ignore[type-var]
             async with asyncio.timeout(settings.REQUEST_TIMEOUT_S):
                 async for ev in gen:
                     if ev.event == "token":

@@ -90,6 +90,19 @@ async def ingest_one(
             duration_ms=_elapsed_ms(start),
         )
 
+    # A non-failed outcome always carries both fields — but that was an unstated invariant, so
+    # every downstream use of `outcome.path`/`outcome.sha256` was Optional. Stating it once here
+    # narrows all four sites below, and turns a would-be AttributeError deep in the loader into
+    # the same isolated `failed` result every other download problem produces.
+    if outcome.path is None or outcome.sha256 is None:
+        note = "download reported success but produced no file"
+        await set_status(session, row.doc_id, DocStatus.failed, note=note)
+        log.error("ingestion.run.download_incomplete")
+        return IngestResult(
+            doc_id=row.doc_id, file_type=row.file_type, status=DocStatus.failed,
+            note=note, duration_ms=_elapsed_ms(start),
+        )
+
     # --- version drift (AC-27/AC-28) — a loud, batch-isolated abort for this one document ---
     try:
         await check_version_drift(session, row, outcome.sha256)

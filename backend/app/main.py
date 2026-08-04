@@ -73,10 +73,13 @@ app.include_router(documents.router)  # F11
 app.include_router(history.router)  # F11
 
 # Typed error handlers → the uniform {error:{type,message,request_id}} envelope (F11, AC-13).
-app.add_exception_handler(RequestValidationError, errors.validation_handler)
-app.add_exception_handler(RateLimited, errors.rate_limited_handler)
-app.add_exception_handler(ProviderError, errors.provider_handler)
-app.add_exception_handler(asyncio.TimeoutError, errors.timeout_handler)
+# Starlette types the handler as taking a bare `Exception`, so a handler annotated with the
+# specific exception it is registered for is always "incompatible" — the narrowing is the whole
+# point of registering per-type. This is a known limitation of the stub, not a defect here.
+app.add_exception_handler(RequestValidationError, errors.validation_handler)  # type: ignore[arg-type]
+app.add_exception_handler(RateLimited, errors.rate_limited_handler)  # type: ignore[arg-type]
+app.add_exception_handler(ProviderError, errors.provider_handler)  # type: ignore[arg-type]
+app.add_exception_handler(asyncio.TimeoutError, errors.timeout_handler)  # type: ignore[arg-type]
 app.add_exception_handler(Exception, errors.unhandled_handler)
 
 

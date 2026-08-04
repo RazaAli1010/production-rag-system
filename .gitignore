@@ -33,6 +33,10 @@ backend/app/data/raw/
 backend/app/data/extracted/
 backend/app/data/*.pkl
 backend/app/data/*.jsonl
+# F15: `make bm25` stages the release BM25 index here for the serving image build. Same artifact,
+# same reason it isn't source — it is rebuilt from the corpus on every release.
+docker/bm25.pkl
+docker/index_manifest.json
 
 # --- Local infra state ---
 docker/**/*.env

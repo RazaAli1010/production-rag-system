@@ -1,0 +1,6 @@
+{
+  "_comment": "F15 nightly retrieval smoke floor. Metric -> minimum acceptable `overall` value. Derived from f6-rerank-after.md (hit@1 0.6825, hit@5 0.9683, mrr 0.7907) with headroom for judge-free run-to-run variance, since the nightly runs the same --flags hybrid=on,rerank=on posture over the full 75-record set. Falling below these means the corpus, the Pinecone index or the embedding model drifted — not that a test broke. Raise these when a gate legitimately improves the numbers.",
+  "hit@1": 0.6,
+  "hit@5": 0.9,
+  "mrr": 0.72
+}
