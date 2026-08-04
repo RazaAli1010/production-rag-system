@@ -9,7 +9,7 @@ import anyio
 import jwt
 from passlib.context import CryptContext
 
-from app.core.exceptions import GENERIC, AuthError
+from app.core.exceptions import GENERIC, RESET_INVALID, AuthError
 
 API_KEY_PREFIX = "crag_"
 
@@ -82,6 +82,59 @@ def encode_refresh(user_id: uuid.UUID, role, *, settings) -> tuple[str, str, dat
         settings=settings,
     )
     return token, jti, expires_at
+
+
+def _reset_key(hashed_password: str, *, settings) -> str:
+    """The reset token's signing key is the app secret PLUS the user's current password hash.
+
+    That is what makes the link single-use with no table to store, prune or race on: the moment the
+    password changes, the hash changes, the key changes, and every link ever issued for that account
+    stops verifying. Logging out everywhere on reset is handled separately, in the service.
+    """
+    return settings.JWT_SECRET.get_secret_value() + hashed_password
+
+
+def encode_reset(user_id: uuid.UUID, hashed_password: str, *, settings) -> str:
+    now = datetime.now(UTC)
+    return jwt.encode(
+        {
+            "sub": str(user_id),
+            "typ": "reset",
+            "iat": now,
+            "exp": now + timedelta(minutes=settings.RESET_TOKEN_TTL_MIN),
+        },
+        _reset_key(hashed_password, settings=settings),
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+def reset_subject(token: str) -> uuid.UUID:
+    """The user id, read WITHOUT verifying — the signing key depends on the user's hash, so the
+    row has to be loaded before the signature can be checked. Nothing is trusted until
+    `decode_reset` runs."""
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False})
+        return uuid.UUID(claims["sub"])
+    except (jwt.PyJWTError, KeyError, ValueError, TypeError) as exc:
+        raise AuthError(400, RESET_INVALID, reason="bad_reset_token") from exc
+
+
+def decode_reset(token: str, hashed_password: str, *, settings) -> dict:
+    try:
+        claims = jwt.decode(
+            token,
+            _reset_key(hashed_password, settings=settings),
+            algorithms=[settings.JWT_ALGORITHM],
+            leeway=settings.JWT_LEEWAY_S,
+        )
+    except jwt.PyJWTError as exc:
+        # Expired, tampered with, or already used (the hash it was signed against is gone) — the
+        # user can only do one thing about any of them, so they get one message.
+        raise AuthError(400, RESET_INVALID, reason="bad_reset_token") from exc
+
+    if claims.get("typ") != "reset":
+        raise AuthError(400, RESET_INVALID, reason="wrong_typ")
+    return claims
 
 
 def decode_token(token: str, *, expect: Literal["access", "refresh"], settings) -> dict:

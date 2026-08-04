@@ -89,4 +89,8 @@ async def _auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
     # is not an enumeration oracle.
     logger.info("auth.reject", reason=exc.reason, status=exc.status, path=request.url.path)
     headers = {"WWW-Authenticate": "Bearer"} if exc.status == 401 else None
-    return JSONResponse({"detail": exc.detail}, status_code=exc.status, headers=headers)
+    # Same status and same (generic) string as before — only the shape changes, to the F11
+    # envelope, so clients render `message` instead of falling back to per-status copy.
+    return JSONResponse(
+        errors.envelope(exc.reason, exc.detail), status_code=exc.status, headers=headers
+    )

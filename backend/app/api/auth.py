@@ -4,7 +4,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import service
 from app.auth.deps import access_claims, client_ip, get_current_user
-from app.auth.schemas import Principal, RefreshRequest, RegisterRequest, TokenResponse, UserOut
+from app.auth.schemas import (
+    ForgotPasswordRequest,
+    Principal,
+    RefreshRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+    UserOut,
+)
 from app.core import exceptions
 from app.core.exceptions import AuthError
 from app.core.settings import settings
@@ -52,6 +60,24 @@ async def refresh(
         settings=settings,
     )
     return TokenResponse(access_token=access, refresh_token=new_refresh)
+
+
+@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(
+    req: ForgotPasswordRequest, session: AsyncSession = Depends(get_session)
+) -> Response:
+    """202 whatever happens — an unknown address, a throttled one and a real send are
+    indistinguishable from the outside."""
+    await service.request_reset(session, req.email, settings=settings)
+    return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(
+    req: ResetPasswordRequest, session: AsyncSession = Depends(get_session)
+) -> Response:
+    await service.reset_password(session, req.token, req.password, settings=settings)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

@@ -307,6 +307,15 @@ class Settings(BaseSettings):
     # university/carrier NAT.
     LOGIN_MAX_FAILURES: int = 10
     LOGIN_LOCKOUT_WINDOW_MIN: int = 15
+    # --- Password reset ---
+    # Short-lived by design: the link is bearer authority over the account, and it lands in an
+    # inbox the student may read on a shared phone.
+    RESET_TOKEN_TTL_MIN: int = 30
+    RESET_MAX_PER_WINDOW: int = 3  # per email, over LOGIN_LOCKOUT_WINDOW_MIN — anti mail-bomb
+    RESEND_API_KEY: SecretStr | None = None  # unset => the link is logged, not sent (dev)
+    RESET_FROM_EMAIL: str = "onboarding@resend.dev"
+    # Where the emailed link points. Must be an origin the UI is actually served from.
+    FRONTEND_BASE_URL: str = "http://localhost:5173"
     # Resolved here by rate_tier(); enforced by F11.
     RATE_LIMIT_ANON_PER_MIN: int = 5
     RATE_LIMIT_STUDENT_PER_MIN: int = 20

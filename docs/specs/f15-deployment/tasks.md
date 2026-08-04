@@ -155,8 +155,11 @@ secret. (AC-28, AC-29, AC-30, AC-31, AC-32)
 Render web service (Docker, GHCR image), Neon/Supabase Postgres, Upstash Redis, Vercel frontend.
 Set every env var from `.env.example`, plus `APP_ENV=prod`, `COOKIE_SAMESITE=none`,
 `COOKIE_SECURE=true`, `CORS_ALLOW_ORIGINS=["https://<app>.vercel.app"]`,
-`VITE_API_BASE_URL=<render url>`. **Measure container RSS after rerank warmup** (NFR-1) and record
-it.
+`VITE_API_BASE_URL=<render url>`. Also the password-reset trio that landed with PR #20 —
+`FRONTEND_BASE_URL` (the reset link's host; the localhost default silently ships dead links),
+`RESEND_API_KEY` (unset ⇒ the link is logged, not emailed) and `RESET_FROM_EMAIL`. None of the
+three is a probed dependency, so `/api/health` stays green while reset is broken. **Measure
+container RSS after rerank warmup** (NFR-1) and record it.
 **Test:** deployed `/api/health` is fully green (all five dependencies `ok`, redis not `skipped`);
 `/api/health/live` reports the deployed SHA; RSS recorded in the runbook. If RSS is near the 512 MB
 tier limit, decide and record: `ENABLE_RERANK=false` or a paid tier — the README then states which

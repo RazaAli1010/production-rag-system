@@ -252,7 +252,30 @@ WHERE session_id = '<session_id>' ORDER BY created_at;
 
 ---
 
-## 9. Common failures
+## 9. Password reset (added by PR #20, no schema change)
+
+Three settings decide whether this feature works in production, and **none of them fail loudly**:
+
+| Key | Dev default | Prod requirement |
+|---|---|---|
+| `FRONTEND_BASE_URL` | `http://localhost:5173` | the Vercel origin — it is the host of the reset link |
+| `RESEND_API_KEY` | unset ⇒ the link is **logged, not emailed** | a real Resend key |
+| `RESET_FROM_EMAIL` | `onboarding@resend.dev` | an address on a verified domain |
+
+Left at defaults, a real user's reset email either never arrives or contains a `localhost` link,
+and `/api/health` reports everything green throughout — none of these is a probed dependency. Set
+them at provisioning time and verify by requesting one reset against the deployed app.
+
+Until a domain is verified with Resend, it only delivers from `onboarding@resend.dev` **to the
+account's own address**, so a test to any other mailbox silently goes nowhere.
+
+Reset tokens are rate-limited by `RESET_MAX_PER_WINDOW` (per email, over
+`LOGIN_LOCKOUT_WINDOW_MIN`) and expire after `RESET_TOKEN_TTL_MIN`. Rotating `JWT_SECRET` (§2)
+invalidates outstanding reset links too.
+
+---
+
+## 10. Common failures
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -264,3 +287,5 @@ WHERE session_id = '<session_id>' ORDER BY created_at;
 | First request after idle hangs ~40s | free-tier cold start | §1 |
 | Everything refuses | index empty or wrong namespace | check `index_manifest.json` and Pinecone counts (§4 step 3) |
 | Burst of 401s right after a config change | `JWT_SECRET` was rotated | expected; users re-login (§2) |
+| Password-reset emails link to `localhost:5173` | `FRONTEND_BASE_URL` left at its dev default | set it to the Vercel origin (§9) |
+| No reset email arrives; the link is in the logs | `RESEND_API_KEY` unset — the documented dev fallback | set the key in prod (§9) |

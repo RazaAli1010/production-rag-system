@@ -9,7 +9,7 @@ from app.auth.schemas import RegisterRequest
 from app.core.exceptions import AuthError
 from app.db.models import ApiKey, LoginAttempt, RefreshToken
 
-PW = "probation123"
+PW = "Probation123"
 EMAIL = "s@pu.edu.pk"
 
 

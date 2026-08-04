@@ -43,6 +43,14 @@ describe("normaliseError", () => {
     expect(e.message).not.toContain("session_busy");
   });
 
+  it("renders an auth 409 as its own message, not the composer copy", async () => {
+    const e = await normaliseError(
+      res(409, { error: { type: "duplicate_email", message: "Email already registered" } }),
+    );
+    expect(e.message).toBe("Email already registered");
+    expect(isSessionBusy(e)).toBe(false);
+  });
+
   it("keeps 422 field detail", async () => {
     const e = await normaliseError(
       res(422, {

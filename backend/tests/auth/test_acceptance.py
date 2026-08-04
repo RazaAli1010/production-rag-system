@@ -23,7 +23,7 @@ from app.db.enums import UserRole
 
 from .conftest import make_settings
 
-PW = "probation123"
+PW = "Probation123"
 EMAIL = "s@pu.edu.pk"
 
 

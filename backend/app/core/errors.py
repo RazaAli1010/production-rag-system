@@ -46,8 +46,16 @@ async def validation_handler(request: Request, exc: RequestValidationError) -> J
 
 
 def _safe_errors(errors: list) -> list:
-    # Drop `ctx`/`input`, which can echo the raw payload back — keep only loc/msg/type.
-    return [{"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")} for e in errors]
+    # Drop `ctx`/`input`, which can echo the raw payload back — keep only loc/msg/type. Pydantic
+    # prefixes a custom validator's message with "Value error, "; strip it so `msg` is renderable.
+    return [
+        {
+            "loc": e.get("loc"),
+            "msg": str(e.get("msg", "")).removeprefix("Value error, "),
+            "type": e.get("type"),
+        }
+        for e in errors
+    ]
 
 
 async def rate_limited_handler(request: Request, exc: RateLimited) -> JSONResponse:
