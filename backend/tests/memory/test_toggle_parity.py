@@ -1,12 +1,12 @@
 """T12 — ENABLE_MEMORY=false OR no session_id ⇒ stateless single turn, byte-for-byte
 f9-cache-after: no memory loaded, no summarizing_memory stage, nothing persisted (AC-33)."""
 
+import app.db.engine as db_engine
 from app.api import ask
 from app.memory import service
 
 from .conftest import make_settings
 from .test_ask_memory import Recorder, _create_session, make_fake_astream, parse_sse
-import app.db.engine as db_engine
 
 
 async def test_memory_off_ignores_session_id(client, authed, monkeypatch):

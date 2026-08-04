@@ -80,7 +80,10 @@ async def _write_guarded(row: dict, *, sessionmaker) -> None:
 
 
 def schedule_request_log(row: dict, *, sessionmaker) -> asyncio.Task:
-    """Fire-and-forget the row write off the response path (AC-4). Returns the task so tests drain."""
+    """Fire-and-forget the row write off the response path (AC-4).
+
+    Returns the task so tests can drain it.
+    """
     task = asyncio.create_task(_write_guarded(row, sessionmaker=sessionmaker))
     _WRITE_TASKS.add(task)
     task.add_done_callback(_WRITE_TASKS.discard)

@@ -1,0 +1,265 @@
+name: Image
+
+# A separate workflow from ci.yml so the Docker build can be `paths:`-filtered (GitHub Actions
+# supports `paths:` only at workflow level, never per job) — a docs-only PR must not spend six
+# minutes rebuilding an unchanged image. The tag path is the release pipeline.
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/image.yml"
+  push:
+    tags: ["v*"]
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/campus-rag-api
+  # 2.5GB (AC-4). The entire budget rests on torch coming from the PyTorch CPU index instead of
+  # PyPI's CUDA build, so this gate is really a regression test for that one Dockerfile line.
+  MAX_IMAGE_BYTES: 2684354560
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # PR: prove the image still builds and still fits. No registry, no secrets, no quota spend.
+  # ---------------------------------------------------------------------------
+  build-pr:
+    name: Build serving image (no push)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The real bm25.pkl is a release artifact built from the live corpus (see the `index` job).
+      # A PR must not spend OpenAI/Pinecone quota to type-check a Dockerfile, so it gets a
+      # three-document synthetic index in the same pickle format the app loads.
+      - name: Synthesise a fixture bm25.pkl
+        run: |
+          set -e
+          pip install "rank-bm25==0.2.2"
+          python - <<'PY'
+          import pickle
+          from rank_bm25 import BM25Okapi
+          texts = ["attendance requirement seventy five percent",
+                   "plagiarism policy similarity index",
+                   "semester fee refund schedule"]
+          ids = ["fixture-doc:0", "fixture-doc:1", "fixture-doc:2"]
+          with open("docker/bm25.pkl", "wb") as f:
+              pickle.dump({"bm25": BM25Okapi([t.split() for t in texts]), "chunk_ids": ids}, f)
+          PY
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.serving
+          build-args: APP_VERSION=${{ github.sha }}
+          tags: campus-rag-api:pr
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Size budget
+        run: |
+          set -e
+          BYTES=$(docker image inspect campus-rag-api:pr --format '{{.Size}}')
+          echo "image size: $((BYTES / 1024 / 1024))MB (budget $((MAX_IMAGE_BYTES / 1024 / 1024))MB)"
+          if [ "$BYTES" -gt "$MAX_IMAGE_BYTES" ]; then
+            echo "serving image is over the 2.5GB budget — is torch coming from the CPU index?" >&2
+            exit 1
+          fi
+
+      - name: No CUDA in the image
+        run: |
+          set -e
+          if docker run --rm --entrypoint sh campus-rag-api:pr -c \
+               'find / -name "libcud*" -o -name "*nvidia*" 2>/dev/null | head -1 | grep .'; then
+            echo "CUDA/NVIDIA libraries found — the CPU torch wheel was not used." >&2
+            exit 1
+          fi
+
+      # The single check that proves the weights are actually baked, rather than assuming it:
+      # no network at all, so a lazy download cannot mask a missing cache.
+      - name: Cross-encoder works with no network
+        run: |
+          docker run --rm --network none --entrypoint python campus-rag-api:pr -c \
+            "from sentence_transformers import CrossEncoder; \
+             print(CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2').predict([('a','b')]))"
+
+  # ---------------------------------------------------------------------------
+  # Tag: rebuild the index, build+push the image, deploy, verify the rollover happened.
+  # ---------------------------------------------------------------------------
+  index:
+    name: Rebuild the release BM25 index
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+      PINECONE_INDEX: ${{ secrets.PINECONE_INDEX }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      ADMIN_EMAIL: release@example.com
+      ADMIN_PASSWORD: unused-at-index-time
+      PYTHONUTF8: "1"          # the corpus contains Urdu; cp1252-style encodings crash structlog
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Required secrets are present
+        run: |
+          set -e
+          for v in DATABASE_URL OPENAI_API_KEY PINECONE_API_KEY PINECONE_INDEX; do
+            eval "val=\$$v"
+            [ -n "$val" ] || { echo "missing repository secret: $v" >&2; exit 1; }
+          done
+
+      - name: Build the ingestion image
+        run: docker build -f docker/Dockerfile.ingestion -t campus-rag-ingest:ci .
+
+      # Ingestion + indexing are RELEASE STEPS, never prod runtime — which is exactly why the
+      # ingestion image (tesseract/libreoffice/ocrmypdf) is never deployed.
+      - name: Ingest and index
+        run: |
+          set -e
+          docker run --rm -e DATABASE_URL -e OPENAI_API_KEY -e PINECONE_API_KEY \
+            -e PINECONE_INDEX -e JWT_SECRET -e ADMIN_EMAIL -e ADMIN_PASSWORD -e PYTHONUTF8 \
+            -v "$PWD/backend/app/data:/app/app/data" \
+            campus-rag-ingest:ci app.ingestion.run --all
+          docker run --rm -e DATABASE_URL -e OPENAI_API_KEY -e PINECONE_API_KEY \
+            -e PINECONE_INDEX -e JWT_SECRET -e ADMIN_EMAIL -e ADMIN_PASSWORD -e PYTHONUTF8 \
+            -v "$PWD/backend/app/data:/app/app/data" \
+            campus-rag-ingest:ci app.indexing.run --strategy structure --namespace all
+
+      # `app.indexing.run` exits 0 on an empty corpus ("indexed 0 docs"), so the exit code alone
+      # would happily ship an empty index. Assert the artifact instead.
+      - name: Assert the index is non-empty
+        run: |
+          set -e
+          test -s backend/app/data/bm25.pkl || { echo "bm25.pkl missing or empty" >&2; exit 1; }
+          python - <<'PY'
+          import json, pathlib, sys
+          m = pathlib.Path("backend/app/data/index_manifest.json")
+          if not m.exists():
+              sys.exit("index_manifest.json missing — indexing did not complete")
+          data = json.loads(m.read_text())
+          print(json.dumps(data, indent=2)[:2000])
+          blob = json.dumps(data)
+          if '"chunks": 0' in blob or not data:
+              sys.exit("indexing produced 0 chunks — refusing to build a release image")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bm25
+          path: |
+            backend/app/data/bm25.pkl
+            backend/app/data/index_manifest.json
+          retention-days: 7
+
+  build:
+    name: Build and push to GHCR
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: index
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bm25
+          path: /tmp/bm25
+
+      - name: Stage the release index into the build context
+        run: |
+          set -e
+          test -s /tmp/bm25/bm25.pkl || {
+            echo "the release bm25.pkl artifact is missing — the serving image bakes it because" >&2
+            echo "/api/health treats a missing BM25 index as a core dependency being down." >&2
+            exit 1; }
+          cp /tmp/bm25/bm25.pkl docker/bm25.pkl
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.serving
+          build-args: APP_VERSION=${{ github.sha }}
+          # Both tags: the git tag is what a human rolls back to, the SHA is what
+          # /api/health/live reports and what the verify step matches on.
+          tags: |
+            ${{ env.IMAGE }}:${{ github.ref_name }}
+            ${{ env.IMAGE }}:${{ github.sha }}
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Size budget
+        run: |
+          set -e
+          docker pull "${IMAGE}:${{ github.sha }}"
+          BYTES=$(docker image inspect "${IMAGE}:${{ github.sha }}" --format '{{.Size}}')
+          echo "image size: $((BYTES / 1024 / 1024))MB"
+          [ "$BYTES" -le "$MAX_IMAGE_BYTES" ] || { echo "over the 2.5GB budget" >&2; exit 1; }
+
+  deploy:
+    name: Deploy to Render and verify the rollover
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Assert first: a missing secret must fail loudly, not silently deploy nothing and report
+      # green. `curl -f` on the hook covers the other half (a non-2xx response fails the step).
+      - name: Required secrets are present
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          PUBLIC_URL: ${{ secrets.PUBLIC_API_URL }}
+        run: |
+          set -e
+          [ -n "$HOOK" ] || { echo "missing repository secret: RENDER_DEPLOY_HOOK_URL" >&2; exit 1; }
+          [ -n "$PUBLIC_URL" ] || { echo "missing repository secret: PUBLIC_API_URL" >&2; exit 1; }
+
+      - name: Trigger the Render deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: curl -fsS -X POST "$HOOK" -o /dev/null
+
+      # A deploy hook returns 200 for "queued", not "live". Without this poll the workflow is
+      # green while the old build is still serving — the single most misleading kind of green.
+      - name: Wait for the new version to serve traffic
+        env:
+          PUBLIC_URL: ${{ secrets.PUBLIC_API_URL }}
+        run: |
+          set -e
+          DEADLINE=$(( $(date +%s) + 600 ))
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            LIVE=$(curl -fsS "$PUBLIC_URL/api/health/live" 2>/dev/null \
+                   | python -c "import json,sys; print(json.load(sys.stdin).get('version',''))" \
+                   2>/dev/null || true)
+            echo "serving version: ${LIVE:-<unreachable>} (want ${GITHUB_SHA})"
+            [ "$LIVE" = "$GITHUB_SHA" ] && { echo "rollover complete"; exit 0; }
+            sleep 15
+          done
+          echo "timed out after 10 minutes waiting for $GITHUB_SHA to serve" >&2
+          exit 1
+
+      # Deep probe, only after the rollover is confirmed. 503 here means the new build is up but
+      # a dependency is misconfigured — worth failing the release for.
+      - name: Deep health check
+        env:
+          PUBLIC_URL: ${{ secrets.PUBLIC_API_URL }}
+        # `-f` alone is the assertion: /api/health returns 503 when any core dependency is down,
+        # so curl fails the step without any output parsing.
+        run: curl -fsS "$PUBLIC_URL/api/health"

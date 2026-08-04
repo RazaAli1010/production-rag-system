@@ -33,7 +33,8 @@ def emit(stage: str, status: str, ms: int | None = None) -> SSEEvent:
     """Build one `stage` SSE event. `status` ∈ {started, done, skipped}; `ms` populated on done.
 
     F13: this single seam also records each `done` span into the request metrics accumulator, so the
-    `request_logs` row gets every stage timing without touching each F5–F8 caller (no-op off an ask).
+    `request_logs` row gets every stage timing without touching each F5–F8 caller (no-op off an
+    ask).
 
     The same single seam attaches the stage's trace detail (`rag/trace.py`) on `done`, so the seams
     that produce the intermediate data just call `trace.record()` and never touch SSE shaping.

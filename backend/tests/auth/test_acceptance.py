@@ -148,7 +148,8 @@ async def test_ac4_bcrypt_does_not_serialize_the_event_loop():
 
 async def test_ac4_blacklist(session, auth_settings):
     """refresh_tokens IS the blacklist: revoked_at flips and the access token dies with it."""
-    await service.register(session, RegisterRequest(email=EMAIL, password=PW), settings=auth_settings)
+    await service.register(session, RegisterRequest(email=EMAIL, password=PW),
+                           settings=auth_settings)
     access, refresh = await service.authenticate(session, EMAIL, PW, settings=auth_settings)
     from app.core.security import decode_token
 
@@ -164,7 +165,8 @@ async def test_ac4_blacklist(session, auth_settings):
 
 
 async def test_ac4_lockout(session, auth_settings):
-    await service.register(session, RegisterRequest(email=EMAIL, password=PW), settings=auth_settings)
+    await service.register(session, RegisterRequest(email=EMAIL, password=PW),
+                           settings=auth_settings)
 
     for _ in range(auth_settings.LOGIN_MAX_FAILURES):
         with pytest.raises(AuthError):

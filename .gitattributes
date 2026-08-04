@@ -1,0 +1,21 @@
+# F15. The repo is developed on Windows, where git's autocrlf happily rewrites these to CRLF on
+# checkout. Inside a Linux container that is not cosmetic:
+#
+#   entrypoint.sh with CRLF  →  the kernel reads the shebang as "/bin/sh\r"
+#                            →  "exec: /bin/sh^M: no such file or directory"
+#
+# ...which looks like a missing shell rather than a line-ending problem, and only ever reproduces
+# in the built image. Pin every file that a Linux process executes or parses.
+*.sh            text eol=lf
+Dockerfile*     text eol=lf
+docker/**       text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+Makefile        text eol=lf
+
+# Binary artifacts — never touch these.
+*.pkl           binary
+*.woff2         binary
+*.png           binary
+*.jpg           binary
+*.pdf           binary

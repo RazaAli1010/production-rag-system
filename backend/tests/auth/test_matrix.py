@@ -91,7 +91,8 @@ async def test_rate_tiers(client, actors, sessionmaker_, auth_settings, actor, e
     "actor, has_history",
     [("anonymous", False), ("student", True), ("admin", True), ("api_key", False)],
 )
-async def test_history_eligibility(client, actors, sessionmaker_, auth_settings, actor, has_history):
+async def test_history_eligibility(client, actors, sessionmaker_, auth_settings, actor,
+                                   has_history):
     """History (F17 sessions/messages) hangs off a user_id, which only a JWT principal supplies.
     F10's contribution is the principal, so that is what this asserts."""
     from app.auth.deps import get_current_user_optional

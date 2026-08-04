@@ -10,8 +10,6 @@ import datetime as dt
 import json
 import uuid
 
-import pytest
-
 import app.db.engine as db_engine
 from app.api import ask
 from app.core.contracts import AnswerResponse, Citation, PipelineFlags
@@ -20,7 +18,7 @@ from app.db.models.chat import Message, Session
 from app.memory import service
 from app.rag.events import SSEEvent
 
-_BASE = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+_BASE = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
 
 
 # --------------------------------------------------------------------------- fakes & helpers
@@ -91,7 +89,8 @@ async def test_happy_path_stages_and_session_id(client, authed, monkeypatch):
     events = parse_sse(r.text)
     kinds = [e[0] for e in events]
 
-    # summarizing_memory leads (skipped on the first turn — no pairs have slid out yet), before token
+    # summarizing_memory leads (skipped on the first turn — no pairs have slid out yet), before
+    # token
     first_stage = next(d for e, d in events if e == "stage")
     assert first_stage["stage"] == "summarizing_memory" and first_stage["status"] == "skipped"
     assert kinds.index("stage") < kinds.index("token")
@@ -103,7 +102,8 @@ async def test_happy_path_stages_and_session_id(client, authed, monkeypatch):
     await service.drain_writes()
     async with db_engine.get_sessionmaker()() as db:
         msgs = await service.get_messages(db, sid)
-    assert [m.role for m in msgs] == [MessageRole.user, MessageRole.assistant]  # write-behind persisted
+    # write-behind persisted
+    assert [m.role for m in msgs] == [MessageRole.user, MessageRole.assistant]
     assert msgs[1].content.startswith("Grounded answer")
 
 

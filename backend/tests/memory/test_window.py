@@ -19,7 +19,8 @@ def _pairs(n: int) -> list[Message]:
     return out
 
 
-def _session(total_tokens: int, summary: str | None = None, summary_tokens: int | None = None) -> Session:
+def _session(total_tokens: int, summary: str | None = None,
+             summary_tokens: int | None = None) -> Session:
     return Session(total_tokens=total_tokens, summary=summary, summary_token_count=summary_tokens)
 
 
@@ -41,7 +42,8 @@ def test_gt5_under_budget_last5_plus_summary():
 
     s = make_settings()
     recent = _pairs(8) + [_msg("user", "current-question")]
-    ctx = window.assemble(_session(total_tokens=1000, summary="rolling summary", summary_tokens=50), recent, s)
+    ctx = window.assemble(
+        _session(total_tokens=1000, summary="rolling summary", summary_tokens=50), recent, s)
 
     assert ctx.summary == "rolling summary"
     assert ctx.summarized is False
@@ -56,7 +58,8 @@ def test_over_budget_shrinks_to_last2_pairs():
 
     s = make_settings()
     recent = _pairs(8) + [_msg("user", "current-question")]
-    ctx = window.assemble(_session(total_tokens=50_001, summary="rolling summary", summary_tokens=40), recent, s)
+    ctx = window.assemble(
+        _session(total_tokens=50_001, summary="rolling summary", summary_tokens=40), recent, s)
 
     assert ctx.summarized is True
     assert ctx.window_pairs == 2

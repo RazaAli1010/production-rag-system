@@ -29,6 +29,34 @@ services:
       timeout: 5s
       retries: 10
 
+  # F15. `make db-up` still starts only postgres+redis, so the bare-metal workflow
+  # (uvicorn on the host, `make migrate`) is unchanged for anyone who never touches this service.
+  #
+  # Needs `docker/bm25.pkl` in the build context first — run `make bm25`. The Dockerfile COPYs it
+  # because /api/health treats a missing BM25 index as a core dependency being down.
+  api:
+    build:
+      context: ..                        # repo root: the Dockerfile COPYs backend/…
+      dockerfile: docker/Dockerfile.serving
+      args:
+        APP_VERSION: dev
+    restart: unless-stopped
+    env_file:
+      - ../backend/.env                  # secrets: OPENAI_API_KEY, PINECONE_*, JWT_SECRET, ADMIN_*
+    environment:
+      # These OVERRIDE the host-oriented URLs in .env with the compose network names. Env
+      # precedence over env_file is what lets one .env serve both the bare-metal and the
+      # containerised run without a second copy.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/campus_rag
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy       # the entrypoint runs `alembic upgrade head` immediately
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   redis-data:

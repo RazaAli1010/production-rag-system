@@ -5,7 +5,8 @@ does NOT already carry — the per-stage timings and the real OpenAI spend — i
 object, so the write-behind `request_logs` row (design §3) can read them once at the end.
 
 `metrics_var` is reset per request by `RequestContextMiddleware`. The `record_*` helpers no-op when
-it is `None`, so shared pipeline code (`stages.emit`, `log_llm_cost`) can call them unconditionally —
+it is `None`, so shared pipeline code (`stages.emit`, `log_llm_cost`) can call them
+unconditionally —
 a non-ask path (a bare task, a health check) simply has no accumulator and drops the record.
 
 Async-mandate: pure in-memory dict/float writes over a handful of values — inline (the cheap side of

@@ -87,6 +87,13 @@ dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.25.0",
     "ruff==0.8.4",
+    "mypy==1.14.1",  # F15: the `types` CI gate, basic mode (see [tool.mypy])
+    "types-aiofiles==24.1.0.20241221",  # real stubs beat `ignore_missing_imports` for aiofiles
+]
+# F15 load test. A separate extra, not `dev`: locust pulls flask/gevent/geventhttpclient, none of
+# which belong in the CI test jobs or anywhere near the serving image.
+load = [
+    "locust==2.32.5",
 ]
 
 [build-system]
@@ -100,6 +107,34 @@ include = ["app*"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.mypy]
+# "Basic mode" (F15 AC-23), deliberately not --strict: `disallow_untyped_defs` over a codebase
+# this size is a refactor, not a deployment feature. This config catches the errors that are
+# actually bugs — wrong argument types, bad attribute access, None misuse — inside function
+# bodies that already carry annotations.
+python_version = "3.11"
+check_untyped_defs = true
+# ragas, langfuse, sentence-transformers, rank_bm25 and pinecone ship no usable stubs. Without
+# this every import of them is an error and the gate becomes noise nobody reads.
+ignore_missing_imports = true
+# A blanket `ignore_errors` is forbidden — it makes the gate decorative. Any escape hatch goes in
+# its own [[tool.mypy.overrides]] block below with a one-line reason.
+exclude = "(^app/db/migrations/versions/|_pycache_)"
+
+# torch, transformers and sentence-transformers ship `py.typed`, so mypy type-checks the whole of
+# each of them on the way through our two import sites. Measured: 20+ minutes and 2.4GB RSS before
+# it was killed, versus seconds with this. `skip` treats them as Any at the boundary — which is all
+# they were ever going to be here, since the calls are `CrossEncoder(...).predict(...)`.
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "transformers.*",
+    "sentence_transformers.*",
+    "ragas.*",
+    "datasets.*",
+]
+follow_imports = "skip"
 
 [tool.ruff]
 line-length = 100

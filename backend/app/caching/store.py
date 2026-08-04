@@ -77,7 +77,9 @@ class SemanticCache:
         self._ids: list = []
         self._query_texts: list[str] = []
         self._discriminators: list[frozenset[str]] = []
-        self._manifests: list[str] = []
+        # `str | None`: the manifest is unknown until the first load, and `_append_row` stores
+        # whatever `_current_manifest` holds — including None.
+        self._manifests: list[str | None] = []
         self._current_manifest: str | None = None
         self._lock = asyncio.Lock()
 
@@ -238,7 +240,10 @@ class SemanticCache:
             f"{settings.CACHE_KEY_PREFIX}{query_hash}", payload, settings=settings
         )
 
-    def _append_row(self, entry_id, normalized: str, vec: list[float], manifest: str,
+    # `manifest: str | None` — None is a legitimate stored value (the manifest is unknown until
+    # the first load), and `_manifests[best] != self._current_manifest` compares against it.
+    # The annotation was narrower than the data; widening it is the fix, not coercing the value.
+    def _append_row(self, entry_id, normalized: str, vec: list[float], manifest: str | None,
                     discriminative_terms: frozenset[str]) -> None:
         self._ids.append(entry_id)
         self._query_texts.append(normalized)

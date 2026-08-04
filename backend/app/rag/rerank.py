@@ -154,7 +154,10 @@ async def rerank_chunks(
         copy = chunk.model_copy()  # carry dense/sparse/fused scores through untouched
         copy.rerank_score = score
         reranked.append(copy)
-    reranked.sort(key=lambda c: c.rerank_score, reverse=True)  # whole objects (AC-9)
+    # `or 0.0`: rerank_score is Optional on the contract, and sorting a list containing None
+    # raises TypeError at runtime rather than type-check time. Every element was just assigned
+    # above, so this is a narrowing for the checker, not a behaviour change.
+    reranked.sort(key=lambda c: c.rerank_score or 0.0, reverse=True)  # whole objects (AC-9)
     top = reranked[: settings.RERANK_TOP_N]
 
     rerank_ms = int((time.perf_counter() - t0) * 1000)

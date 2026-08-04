@@ -21,6 +21,26 @@ async def test_all_up_returns_200(client, monkeypatch, tmp_path):
     assert deps["openai_key"] == "ok"
 
 
+async def test_live_stays_up_while_health_is_degraded(client, monkeypatch, tmp_path):
+    """F15 AC-16/17 — the contrast IS the feature.
+
+    /api/health 503s on any core dependency; /api/health/live touches none and takes no DB session,
+    so a Redis/Pinecone blip can never make the platform restart an API that still answers.
+    """
+    s = make_settings(BM25_PATH=tmp_path / "absent.pkl", APP_VERSION="abc1234")
+    monkeypatch.setattr(health_router, "settings", s)
+
+    def _boom():
+        raise RuntimeError("pinecone unreachable")
+
+    monkeypatch.setattr(health_router, "_pinecone_sync", _boom)
+
+    assert (await client.get("/api/health")).status_code == 503
+    r = await client.get("/api/health/live")
+    assert r.status_code == 200
+    assert r.json() == {"status": "live", "version": "abc1234"}
+
+
 async def test_pinecone_down_returns_503(client, monkeypatch, tmp_path):
     bm25 = tmp_path / "bm25.pkl"
     bm25.write_bytes(b"x")

@@ -24,7 +24,7 @@ def _build_llm(settings) -> ChatOpenAI:
     return ChatOpenAI(
         model=settings.MEMORY_SUMMARY_MODEL,
         temperature=settings.MEMORY_SUMMARY_TEMPERATURE,
-        max_tokens=settings.MEMORY_SUMMARY_MAX_TOKENS,
+        max_tokens=settings.MEMORY_SUMMARY_MAX_TOKENS,  # type: ignore[call-arg]  # accepted at runtime; absent from the stub
         api_key=settings.OPENAI_API_KEY.get_secret_value(),
     )
 
@@ -43,7 +43,8 @@ async def extend_summary(old_summary: str | None, pending: list[Message], settin
     prior = old_summary or "(no summary yet)"
     human = f"Existing summary:\n{prior}\n\nNew turns to fold in:\n{_render_pending(pending)}"
     msg = await llm.ainvoke([("system", _SYSTEM), ("human", human)])
-    new_summary = msg.content.strip()
+    # AIMessage.content is `str | list[...]`; the summariser is a text-only chat model.
+    new_summary = (msg.content if isinstance(msg.content, str) else str(msg.content)).strip()
 
     tokens_in = len((_SYSTEM + human).split())  # rough; exact accounting via usage when available
     usage = getattr(msg, "usage_metadata", None) or {}

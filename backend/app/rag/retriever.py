@@ -61,7 +61,9 @@ def _none_if_sentinel(value: int | None) -> int | None:
 def _to_retrieved_chunk(doc: Document, score: float) -> RetrievedChunk:
     md = doc.metadata
     return RetrievedChunk(
-        chunk_id=doc.id,
+        # Document.id is Optional upstream; Pinecone always returns one, and a None would be
+        # rejected by pydantic here anyway rather than silently producing a bad citation id.
+        chunk_id=doc.id,  # type: ignore[arg-type]
         doc_id=md["doc_id"],
         title=md["title"],
         text=doc.page_content,

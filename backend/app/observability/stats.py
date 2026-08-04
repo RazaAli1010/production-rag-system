@@ -78,7 +78,8 @@ _SESSIONS = text("""
 """)
 
 
-async def gather_stats(db: AsyncSession, window: timedelta, *, summary_budget: int) -> StatsResponse:
+async def gather_stats(db: AsyncSession, window: timedelta, *,
+                       summary_budget: int) -> StatsResponse:
     since = datetime.now(UTC) - window
     p = {"since": since}
 

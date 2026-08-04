@@ -13,7 +13,8 @@ so a flaky cross-encoder can never block answering (mirrors F7's rewrite fallbac
 
 Async-mandate placement: sentence scoring reuses F6's `anyio.to_thread.run_sync(model.score, …)`
 offload (the same loaded cross-encoder, one set of weights); tiktoken counting, the n-gram/Jaccard
-set math, dedupe, and the greedy fill run inline as cheap pure-CPU (same side of the line as F5's RRF
+set math, dedupe, and the greedy fill run inline as cheap pure-CPU (same side of the line as
+F5's RRF
 / F6's sigmoid). No sync twin appears here (the `app/rag/` grep-guard covers this module).
 """
 
@@ -94,7 +95,8 @@ def dedupe(chunks: list[RetrievedChunk], settings) -> tuple[list[RetrievedChunk]
 
 def relevance_floor(chunks: list[RetrievedChunk], settings) -> tuple[list[RetrievedChunk], int]:
     """Keep chunks with `rerank_score >= COMPRESSION_SCORE_FLOOR` (a `None` score is always kept —
-    no calibrated signal to floor against, AC-3). If fewer than `COMPRESSION_MIN_CHUNKS` survive, top
+    no calibrated signal to floor against, AC-3). If fewer than `COMPRESSION_MIN_CHUNKS`
+    survive, top
     up from the dropped set by descending score (AC-2), preserving original rerank order."""
     floor = settings.COMPRESSION_SCORE_FLOOR
     min_chunks = settings.COMPRESSION_MIN_CHUNKS
@@ -111,7 +113,8 @@ def relevance_floor(chunks: list[RetrievedChunk], settings) -> tuple[list[Retrie
     return kept, len(chunks) - len(kept)
 
 
-# ------------------------------------------------------------- token budget + sentence trim (AC-6/7/8)
+# ------------------------------------------------------------- token budget + sentence trim
+# (AC-6/7/8)
 
 def _split_sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_SPLIT.split(text.strip()) if s.strip()]
@@ -192,7 +195,8 @@ async def token_budget_fill(
     return kept, sentences_dropped
 
 
-# --------------------------------------------------------------------------- orchestrator (AC-12/13)
+# --------------------------------------------------------------------------- orchestrator
+# (AC-12/13)
 
 async def compress_chunks(
     query: str, chunks: list[RetrievedChunk], settings

@@ -1,0 +1,48 @@
+# CampusRAG ingestion image (F15).
+#
+# Build context is the REPO ROOT:
+#   docker build -f docker/Dockerfile.ingestion -t campus-rag-ingest .
+# Run:
+#   docker run --rm --env-file backend/.env -v "$PWD/backend/app/data:/app/app/data" \
+#       campus-rag-ingest app.ingestion.run --all
+#
+# This image carries the heavy `unstructured` system dependencies (tesseract, libreoffice,
+# ocrmypdf) that the serving image deliberately does NOT. It is a local/CI release tool: ingestion
+# and indexing are release STEPS, never prod runtime, so it is never deployed to Render and is not
+# in docker-compose's default profile. No size budget applies.
+
+FROM python:3.11-slim
+
+ENV PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+
+# tesseract-ocr-urd is not optional: Settings.OCR_LANGUAGES defaults to "eng+urd", and without the
+# Urdu traineddata every scanned Urdu page fails at runtime with a language-data error.
+#
+# libreoffice-{writer,impress,calc} rather than the `libreoffice` metapackage — the metapackage
+# drags in Base/Draw and ~400MB of formats LIBREOFFICE_BIN is never asked to convert.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-urd \
+        ocrmypdf \
+        libreoffice-writer libreoffice-impress libreoffice-calc \
+        poppler-utils ghostscript \
+        libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY backend/pyproject.toml ./
+COPY backend/app ./app
+COPY backend/alembic.ini ./
+
+# Same CPU-torch-first trick as the serving image (pin read from pyproject, never repeated):
+# indexing imports the app package, which transitively imports torch via the F6 rerank module.
+# Single-stage here, so a plain install is enough — no venv juggling needed.
+RUN TORCH_PIN=$(grep -oE '"torch==[^"]+"' pyproject.toml | tr -d '"') \
+    && test -n "$TORCH_PIN" || (echo "no torch pin found in pyproject.toml" >&2; exit 1) \
+    && pip install --index-url https://download.pytorch.org/whl/cpu "$TORCH_PIN"
+
+RUN pip install .
+
+# `python -m` — so the run command is just the module path plus its flags:
+#   ... campus-rag-ingest app.indexing.run --strategy structure --namespace all
+ENTRYPOINT ["python", "-m"]

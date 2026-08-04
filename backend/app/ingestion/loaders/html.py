@@ -50,7 +50,11 @@ def _parse_sync(html: str, doc_id: str) -> list[Document]:
             text = el.get_text(" ", strip=True)
             if not text:
                 continue
-            anchor = el.get("id") or slugify(text)
+            # bs4 types every attribute as `str | AttributeValueList` because attributes like
+            # `class` are multi-valued. `id` is single-valued per the HTML spec; narrow here so
+            # the slug pipeline below is plain str.
+            raw_id = el.get("id")
+            anchor = (raw_id if isinstance(raw_id, str) else None) or slugify(text)
             base, i = anchor, 2
             while anchor in seen_slugs:  # de-dupe generated slugs for repeated headings
                 anchor = f"{base}-{i}"
@@ -76,7 +80,8 @@ def _parse_sync(html: str, doc_id: str) -> list[Document]:
 
     visible_text_len = sum(len(b.page_content) for b in blocks)
     pdf_links = [
-        a["href"] for a in body.find_all("a", href=True) if a["href"].lower().endswith(".pdf")
+        href for a in body.find_all("a", href=True)
+        if isinstance(href := a["href"], str) and href.lower().endswith(".pdf")
     ]
     links_only_pdf = bool(pdf_links) and visible_text_len < _LINK_ONLY_TEXT_THRESHOLD
 

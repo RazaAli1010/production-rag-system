@@ -1,7 +1,8 @@
 """F8 context-compression unit + wiring tests (requirements.md §4).
 
 No live model on the pure-function paths: dedupe/floor/budget are score+tiktoken only, and sentence
-trimming is exercised with a `FakeCrossEncoder` (the F6 stand-in). The `_pipeline_events` wiring test
+trimming is exercised with a `FakeCrossEncoder` (the F6 stand-in). The `_pipeline_events` wiring
+test
 drives `baseline.astream` with the F3 streaming harness (fixed retrieve + fake LLM), asserting
 compression runs on the non-refused set and the compressed list flows to context + citations.
 """
@@ -93,11 +94,13 @@ def test_floor_keeps_none_scored_chunk():
     assert [x.chunk_id for x in kept] == ["a", "b"]  # None kept (no signal to floor), c dropped
 
 
-# --------------------------------------------------------- token budget + sentence trim (AC-6/7/8/10)
+# --------------------------------------------------------- token budget + sentence trim
+# (AC-6/7/8/10)
 
 async def test_budget_keeps_fitting_chunks_whole():
     chunks = [_rc(f"c{i}", text=f"short sentence number {i}.", score=0.9) for i in range(3)]
-    kept, n = await compression.token_budget_fill("q", chunks, _settings(COMPRESSION_TOKEN_BUDGET=2200))
+    kept, n = await compression.token_budget_fill(
+        "q", chunks, _settings(COMPRESSION_TOKEN_BUDGET=2200))
     assert [c.chunk_id for c in kept] == ["c0", "c1", "c2"] and n == 0  # all fit, nothing trimmed
 
 
@@ -149,7 +152,8 @@ async def test_trim_noop_when_chunk_fits(monkeypatch):
     assert out is chunk and dropped == 0
 
 
-# --------------------------------------------------------------------------- orchestrator (AC-12/13)
+# --------------------------------------------------------------------------- orchestrator
+# (AC-12/13)
 
 async def test_compress_chunks_reduces_tokens_and_logs_once(monkeypatch):
     logged = {}
@@ -157,12 +161,14 @@ async def test_compress_chunks_reduces_tokens_and_logs_once(monkeypatch):
                         lambda **kw: logged.update(kw))
     dup = "identical overlapping clause that appears twice in two adjacent fixed window chunks here"
     chunks = [_rc("a", text=dup, score=0.9), _rc("b", text=dup, score=0.4),
-              _rc("c", text="unique relevant clause about probation and cgpa thresholds", score=0.8),
+              _rc("c", text="unique relevant clause about probation and cgpa thresholds",
+                  score=0.8),
               _rc("d", text="low relevance tail", score=0.05)]
     out = await compression.compress_chunks("q", chunks, _settings(COMPRESSION_SCORE_FLOOR=0.25))
     assert [c.chunk_id for c in out] == ["a", "c"]  # b deduped, d floored
     assert logged["tokens_after"] < logged["tokens_before"]
-    assert logged["chunks_before"] == 4 and logged["chunks_after"] == 2  # dropped derived in the log fn
+    # dropped derived in the log fn
+    assert logged["chunks_before"] == 4 and logged["chunks_after"] == 2
 
 
 async def test_compress_chunks_empty_input_is_noop():
@@ -199,7 +205,8 @@ def test_parse_flags_accepts_compression():
     assert flags.compression is True and flags.cache is False  # cache still forced off
 
 
-# --------------------------------------------------------------- _pipeline_events wiring (AC-9/11/16)
+# --------------------------------------------------------------- _pipeline_events wiring
+# (AC-9/11/16)
 
 def _fake_llm(text):
     return lambda settings: GenericFakeChatModel(messages=iter([AIMessage(content=text)]))
@@ -229,7 +236,8 @@ async def test_compression_runs_on_pipeline_and_drives_citations(monkeypatch, se
     monkeypatch.setattr(baseline.compression_mod, "compress_chunks", _spy_compress)
     monkeypatch.setattr(baseline, "build_llm", _fake_llm("Per the rules [1][2]."))
     # The pipeline's `apply_flags` overlay drives ENABLE_* from the request flags (not settings);
-    # rerank on so the refusal gate reads the calibrated rerank_score (F8 depends on F6). retrieve is
+    # rerank on so the refusal gate reads the calibrated rerank_score (F8 depends on F6). retrieve
+    # is
     # patched, so no cross-encoder actually loads. COMPRESSION_SCORE_FLOOR is a plain setting.
     flags = PipelineFlags(rerank=True, compression=True)
     settings = _settings(COMPRESSION_SCORE_FLOOR=0.25)
@@ -237,7 +245,8 @@ async def test_compression_runs_on_pipeline_and_drives_citations(monkeypatch, se
     events = await _collect(baseline.astream("how to exit probation?", flags=flags, session=session,
                                              settings=settings))
     citations = next(e for e in events if e.event == "citations").data["citations"]
-    assert seen["query"] == "how to exit probation?" and seen["n_in"] == 3  # scoring query = raw (AC-9)
+    # scoring query = raw (AC-9)
+    assert seen["query"] == "how to exit probation?" and seen["n_in"] == 3
     cited_ids = {c["chunk_id"] for c in citations}
     assert "c2" not in cited_ids  # the floored chunk never reached the prompt/citations (AC-11)
 

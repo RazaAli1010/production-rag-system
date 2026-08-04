@@ -11,6 +11,29 @@ async def test_anonymous_create_sets_signed_cookie(client):
     assert body["title"] is None and body["total_tokens"] == 0
 
 
+async def test_anon_cookie_defaults_are_same_site(client):
+    """F15 AC-19 — the defaults must be byte-identical to the previous hardcoded `samesite="lax"`
+    with no Secure flag, so making the attributes configurable changes nothing locally."""
+    r = await client.post("/api/sessions")
+    cookie = r.headers["set-cookie"].lower()
+    assert "samesite=lax" in cookie
+    assert "httponly" in cookie
+    assert "secure" not in cookie
+
+
+async def test_anon_cookie_cross_site_config(client, monkeypatch):
+    """F15 AC-19 — prod (Vercel UI → Render API) is cross-site, where a Lax cookie is never sent."""
+    from app.api import sessions as sessions_router
+    from tests.memory.conftest import make_settings
+
+    monkeypatch.setattr(sessions_router, "settings",
+                        make_settings(COOKIE_SAMESITE="none", COOKIE_SECURE=True))
+    r = await client.post("/api/sessions")
+    cookie = r.headers["set-cookie"].lower()
+    assert "samesite=none" in cookie
+    assert "secure" in cookie  # browsers reject SameSite=None without it
+
+
 async def test_authed_create_lists_and_is_scoped(client, authed):
     r = await client.post("/api/sessions", headers=authed["headers"])
     assert r.status_code == 201
@@ -40,13 +63,13 @@ async def test_messages_returns_full_transcript(client, authed):
     sid = uuid.UUID(r.json()["id"])
 
     # seed two messages directly (the ask route is exercised in test_ask_memory)
-    from .conftest import make_settings  # noqa: F401 — keep import local to avoid ordering issues
+    import datetime as dt
 
     # use the app dependency's DB by hitting the endpoint after inserting via a fresh session
     import app.db.engine as db_engine
 
-    import datetime as dt
-    base = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    from .conftest import make_settings  # noqa: F401 — keep import local to avoid ordering issues
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
     async with db_engine.get_sessionmaker()() as db:
         db.add(Message(session_id=sid, role=MessageRole.user, content="hi", token_count=1,
                        created_at=base))
@@ -73,10 +96,11 @@ async def test_delete_archives(client, authed):
 
 async def test_auto_title_truncated_to_60(client, authed):
     """The title is set from the first persisted question; drive one ask to trigger it."""
-    # created here, titled by the ask route in test_ask_memory; this test asserts the cap via service
+    # created here, titled by the ask route in test_ask_memory; this test asserts the cap via
+    # service
+    import app.db.engine as db_engine
     from app.memory import service
 
-    import app.db.engine as db_engine
     from .conftest import make_settings
 
     settings = make_settings()

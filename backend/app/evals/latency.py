@@ -83,7 +83,7 @@ async def run_latency(
 
     if settings.EVAL_LATENCY_ENDPOINT:
         totals, stage_series, token_counts = await _run_endpoint(questions, flags, settings)
-        metas = []  # the HTTP path does not parse `meta` yet — F11 owns that endpoint
+        metas: list[dict] = []  # the HTTP path does not parse `meta` yet — F11 owns that endpoint
     else:
         totals, stage_series, token_counts, metas = [], {}, [], []
         for q in questions:

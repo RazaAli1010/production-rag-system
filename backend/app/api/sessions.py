@@ -76,7 +76,10 @@ async def create_session(
             cookies.COOKIE_NAME,
             cookies.sign(s.id, settings=settings),
             httponly=True,
-            samesite="lax",
+            # F15: cross-site in prod (Vercel UI → Render API), same-site locally. Defaults are
+            # "lax"/False, so this is byte-identical to the previous hardcoded pair in dev/CI.
+            samesite=settings.COOKIE_SAMESITE,
+            secure=settings.COOKIE_SECURE,
             max_age=settings.MEMORY_ANON_TTL_DAYS * 86_400,
         )
     return SessionOut.model_validate(s)

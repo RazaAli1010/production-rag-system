@@ -127,11 +127,14 @@ class Settings(BaseSettings):
     # RERANK_TOP_N / RERANK_CANDIDATE_K / HYBRID_* are reused by the fan-out, NOT redefined.
 
     # --- Context compression (F8) ---
-    ENABLE_COMPRESSION: bool = False  # prod/request toggle; False ≡ f7-rewrite-after gen path (AC-16)
+    # prod/request toggle; False ≡ f7-rewrite-after gen path (AC-16)
+    ENABLE_COMPRESSION: bool = False
     COMPRESSION_SCORE_FLOOR: float = 0.25  # drop reranked chunks below this calibrated score (AC-1)
     COMPRESSION_MIN_CHUNKS: int = 2  # never leave a non-refused query fewer than this many (AC-2)
-    COMPRESSION_TOKEN_BUDGET: int = 2200  # greedy-fill budget; overflow chunk sentence-trimmed (AC-6/7)
-    COMPRESSION_DEDUPE_JACCARD: float = 0.7  # 5-gram Jaccard above this drops the lower-scored dup (AC-4)
+    # greedy-fill budget; overflow chunk sentence-trimmed (AC-6/7)
+    COMPRESSION_TOKEN_BUDGET: int = 2200
+    # 5-gram Jaccard above this drops the lower-scored dup (AC-4)
+    COMPRESSION_DEDUPE_JACCARD: float = 0.7
     COMPRESSION_DEDUPE_NGRAM: int = 5  # word-level n-gram size for the dedupe similarity (AC-4)
     # RERANK_MODEL / RERANK_DEVICE reused for sentence scoring, NOT redefined.
 
@@ -209,7 +212,8 @@ class Settings(BaseSettings):
     ENABLE_RATE_LIMIT: bool = True  # prod toggle; False ≡ F17 route, never 429 (AC-12/22)
     CORS_ALLOW_ORIGINS: list[str] = []  # exact-origin allowlist; empty ⇒ no cross-origin (AC-15)
     REQUEST_TIMEOUT_S: float = 30.0  # server-side ask timeout → SSE error / 504 (AC-17)
-    GZIP_MIN_BYTES: int = 500  # gzip threshold; SSE frames stay below it, so streaming is unaffected
+    # gzip threshold; SSE frames stay below it, so streaming is unaffected
+    GZIP_MIN_BYTES: int = 500
     HISTORY_PAGE_SIZE: int = 50  # GET /api/history page (AC-5)
     RATE_LIMIT_WINDOW_S: int = 60  # fixed-window size for the Redis limiter (AC-8)
     # F11 plumbs `deep=true` to this model by handing the pipeline a settings copy with LLM_MODEL
@@ -237,6 +241,20 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: SecretStr | None = None
     LANGFUSE_SECRET_KEY: SecretStr | None = None
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+
+    # --- Deployment (F15) ---
+    # Stamped at image build (`--build-arg APP_VERSION=$GITHUB_SHA`). Returned by
+    # /api/health/live and bound onto every structlog line + Langfuse trace, so a trace maps to
+    # an exact release and the deploy workflow can verify WHICH build is actually serving.
+    APP_VERSION: str = "dev"
+    # The Vercel frontend and the Render API are cross-site, so the anonymous session cookie
+    # needs `SameSite=None; Secure` or the browser never sends it and every anonymous session
+    # silently breaks in prod — a failure that cannot reproduce locally, where the Vite dev proxy
+    # makes everything same-origin. Two keys, not one: browsers reject SameSite=None without
+    # Secure, AND reject Secure cookies over plain http, so localhost must be able to set them
+    # independently. Defaults keep local/CI behaviour byte-identical.
+    COOKIE_SECURE: bool = False
+    COOKIE_SAMESITE: Literal["lax", "none"] = "lax"
 
     # --- Observability (F13) ---
     APP_ENV: str = "dev"  # Langfuse env tag + structlog field; "prod" on Render
@@ -296,4 +314,6 @@ class Settings(BaseSettings):
     RATE_LIMIT_API_KEY_PER_MIN: int = 30
 
 
-settings = Settings()
+# The ignore below: pydantic-settings fills the required fields from the environment/.env at
+# runtime, but mypy only sees the class signature and reports all seven as missing kwargs.
+settings = Settings()  # type: ignore[call-arg]

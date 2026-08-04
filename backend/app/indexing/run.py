@@ -117,7 +117,6 @@ async def main(argv=None, settings=None, index=None, embeddings=None):
                 logger.error("indexing.run.doc_failed", doc_id=row.doc_id, exc_info=True)
                 result = IndexResult(doc_id=row.doc_id, namespace=row.source_org.lower(),
                                      chunk_count=0, tokens_in=0, cost_usd=0.0, status="failed")
-                chunks = []
             if result.status == "skipped":
                 skipped.append(row.doc_id)
             results.append(result)
@@ -140,7 +139,9 @@ async def main(argv=None, settings=None, index=None, embeddings=None):
                     raise SystemExit(
                         f"reconcile mismatch ns={ns}: vectors={vec_count} chunks={db_count}"
                     )
-            manifest_ns[ns] = {"vectors": db_count, "chunks": db_count}
+            # `or 0`: scalar() is typed Optional, but COUNT() never returns NULL. A None would
+            # silently write `null` into the manifest that every eval report is stamped with.
+            manifest_ns[ns] = {"vectors": db_count or 0, "chunks": db_count or 0}
 
     total_tokens = sum(r.tokens_in for r in results)
     total_cost = sum(r.cost_usd for r in results)

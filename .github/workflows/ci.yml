@@ -652,15 +652,159 @@ jobs:
           fi
           ruff check app/api app/core/middleware.py app/core/errors.py app/core/ratelimit.py
 
-      - name: No-migration guard (F11 adds NO Alembic revision — documents/request_logs/sessions/
-          messages were migrated by F12; AnswerResponse is a wire model. Autogenerate must be empty.)
+      # The F11-specific no-migration guard that used to live here was replaced by the repo-wide
+      # `model-drift` job below (F15). One guard, checking every model, instead of one per feature.
+
+  # ---------------------------------------------------------------------------
+  # F15 — repo-wide gates. The nine per-module jobs above lint only their own module and each
+  # asserts its own async guard; nothing until now checked the codebase as a whole.
+  # ---------------------------------------------------------------------------
+
+  lint:
+    name: F15 — ruff over the whole backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # ruff alone — no project install, no Postgres. Seconds, not minutes.
+      - run: pip install ruff==0.8.4
+      - name: Ruff
+        working-directory: backend
+        run: ruff check app tests
+
+  types:
+    name: F15 — mypy (basic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      # Config (and the reason for every escape hatch) lives in backend/pyproject.toml
+      # [tool.mypy]. Not --strict: annotating the whole pre-existing codebase is a refactor, not a
+      # deployment feature.
+      - name: Mypy
+        working-directory: backend
+        run: mypy app
+
+  migrations:
+    name: F15 — migration round-trip (upgrade → downgrade base → upgrade)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      REDIS_URL: redis://localhost:6379/0
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
+      OPENAI_API_KEY: sk-ci-only-placeholder
+      PINECONE_API_KEY: pc-ci-only-placeholder
+      PINECONE_INDEX: campus-rag-ci
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # The other jobs only ever run `upgrade head`, so a broken `downgrade()` would sit unnoticed
+      # until the 3am rollback in docs/runbook.md — the one moment it must work. This is the job
+      # that makes that runbook step real.
+      - name: Round-trip
         working-directory: backend
         run: |
           set -e
-          python -m alembic revision --autogenerate -m "f11guard" --rev-id f11guard
-          GENERATED="app/db/migrations/versions/f11guard_f11guard.py"
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+
+  model-drift:
+    name: F15 — no un-migrated model change
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/campus_rag
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ci-only-password
+      JWT_SECRET: ci-only-not-a-real-secret
+      OPENAI_API_KEY: sk-ci-only-placeholder
+      PINECONE_API_KEY: pc-ci-only-placeholder
+      PINECONE_INDEX: campus-rag-ci
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # Generalises the per-feature "this feature adds no migration" guards: any model change
+      # without a matching Alembic revision fails here, whichever feature made it. F15 itself adds
+      # no migration, and this is what proves it.
+      - name: Autogenerate must be empty
+        working-directory: backend
+        run: |
+          set -e
+          alembic upgrade head
+          alembic revision --autogenerate -m "driftguard" --rev-id driftguard
+          GENERATED="app/db/migrations/versions/driftguard_driftguard.py"
           if grep -qE "op\.(create_table|add_column|drop_column|alter_column|create_index|drop_table|drop_index|create_foreign|drop_constraint)" "$GENERATED"; then
-            echo "F11 produced a non-empty migration — it must add no schema change." >&2
+            echo "A model changed without an Alembic migration — autogenerate is not empty." >&2
             cat "$GENERATED" >&2
             exit 1
           fi

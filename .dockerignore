@@ -1,0 +1,46 @@
+# Build context is the REPO ROOT (both Dockerfiles COPY backend/…), so everything the images
+# don't need is excluded here. Without this the context includes venv/ + node_modules/ and the
+# build spends minutes shipping ~2GB to the daemon before running a single instruction.
+
+.git
+.github
+.claude
+.superpowers
+
+# Secrets — never in an image layer, even a discarded one.
+.env
+**/.env
+!**/.env.example
+
+# Virtualenvs / caches
+venv
+.venv
+**/__pycache__
+*.py[cod]
+**/*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# Frontend — Vercel builds it; it is not in either backend image.
+frontend
+
+# Regenerable corpus artifacts. NOTE: `docker/bm25.pkl` is deliberately NOT excluded — the
+# serving image COPYs it from the context (see docker/Dockerfile.serving).
+backend/app/data/raw
+backend/app/data/extracted
+backend/app/data/*.jsonl
+
+# Docs / specs / eval reports — the images serve an API, not a wiki.
+docs
+*.md
+!backend/README.md
+
+# Local infra state
+postgres-data
+redis-data
+*.db
+*.sqlite3
+*.log

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import update
@@ -64,7 +64,7 @@ async def test_lockout_ages_out_of_the_window(session, auth_settings):
     await _register(session, auth_settings)
     await _fail(session, auth_settings, 10)
 
-    stale = datetime.now(timezone.utc) - timedelta(
+    stale = datetime.now(UTC) - timedelta(
         minutes=auth_settings.LOGIN_LOCKOUT_WINDOW_MIN + 1
     )
     await session.execute(update(LoginAttempt).values(attempted_at=stale))

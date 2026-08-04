@@ -94,7 +94,7 @@ def _build_rewrite_llm(settings) -> ChatOpenAI:
     return ChatOpenAI(
         model=settings.REWRITE_MODEL,
         temperature=settings.REWRITE_TEMPERATURE,
-        max_tokens=settings.REWRITE_MAX_TOKENS,
+        max_tokens=settings.REWRITE_MAX_TOKENS,  # type: ignore[call-arg]  # accepted at runtime; absent from the stub
         api_key=settings.OPENAI_API_KEY.get_secret_value(),
         model_kwargs={"response_format": {"type": "json_object"}},
     )
@@ -164,11 +164,14 @@ async def rewrite_query(query: str, memory: MemoryContext | None, settings) -> R
         messages = _build_messages(query, memory)
         async with asyncio.timeout(settings.REWRITE_TIMEOUT_S):
             msg = await llm.ainvoke(messages)
-        data = json.loads(msg.content)
+        # AIMessage.content is `str | list[...]` (multimodal); a text-only chat model always
+        # returns str. Narrow explicitly rather than assume.
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        data = json.loads(content)
         if not isinstance(data, dict):
             raise ValueError("rewrite output was not a JSON object")
         result = _coerce(data, query, settings)
-        tokens_in, tokens_out = _token_counts(msg, messages, msg.content)
+        tokens_in, tokens_out = _token_counts(msg, messages, content)
         await observability.log_llm_cost(settings.REWRITE_MODEL, tokens_in, tokens_out)
     except Exception as exc:  # noqa: BLE001 — rewrite is best-effort; never propagate past this seam
         # Timeout / bad JSON / schema-invalid / provider error → raw-query fallback (AC-10). No cost
