@@ -183,21 +183,33 @@ semantic tier is opt-in. The Redis exact-match tier carries the real value.
 ```bash
 git clone <repo> && cd campus-rag
 cp backend/.env.example backend/.env    # add your OpenAI + Pinecone keys
-
-# Local stack: Postgres + Redis + API, migrations applied automatically
-make bm25      # builds the BM25 index (needs the corpus ingested; see below)
-make up        # → http://localhost:8000/api/health
-
-# Frontend
-make fe-install && make fe-dev          # → http://localhost:5173
 ```
 
-Bare-metal (no Docker for the API):
+**Everything in one command** (needs ~25GB free disk — the image carries torch + a cross-encoder):
 
 ```bash
-make db-up && make migrate && make seed
-cd backend && uvicorn app.main:app --reload
+docker compose -f docker/docker-compose.yml up --build
 ```
+
+Postgres + Redis + API + frontend, migrations applied automatically by the API entrypoint.
+Frontend on **http://localhost:5173**, API on **:8000**.
+
+**Or run it directly** — lighter, and the path to use if disk is tight:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d postgres redis
+cd backend && alembic upgrade head && python -m app.db.seed
+cd backend && uvicorn app.main:app --reload   # → :8000
+
+cd frontend && npm ci && npm run dev          # → :5173
+```
+
+The Vite dev server proxies `/api` to the backend, so the browser sees one origin — which is what
+keeps the `SameSite=Lax` anonymous session cookie working, exactly as Vercel's rewrites do in prod.
+
+> The `Makefile` holds the same commands as short aliases (`make up`, `make db-up`, `make fe-dev`).
+> They are aliases, not the interface — `make` is not installed by default on Windows, so every
+> command above is written out in full.
 
 Populate the corpus (once, needs API keys):
 

@@ -34,9 +34,13 @@ RUN TORCH_PIN=$(grep -oE '"torch==[^"]+"' pyproject.toml | tr -d '"') \
     && test -n "$TORCH_PIN" || (echo "no torch pin found in pyproject.toml" >&2; exit 1) \
     && pip install --index-url https://download.pytorch.org/whl/cpu "$TORCH_PIN"
 
-# Runtime deps only — no `[dev]`, so ruff/pytest/mypy/locust never ship. torch is already
-# satisfied in the venv, so this does not reach for the CUDA build.
-RUN pip install .
+# `.[serving]` — NOT `.` and NOT `.[ingestion]`. The serving app never imports app.ingestion or
+# unstructured (verified by import graph), and unstructured's wrapt>=2.1.1 is irreconcilable with
+# langfuse's wrapt<2.0, so installing the parsing stack here would make Langfuse uninstallable
+# AND drag spacy/numba/nltk into an image that never calls them.
+# No `[dev]`, so ruff/pytest/mypy/locust never ship. torch is already satisfied in the venv, so
+# this does not reach for the CUDA build.
+RUN pip install '.[serving]'
 
 # ---------------------------------------------------------------- weights ----
 # Bake the cross-encoder into the image so the first request never reaches huggingface.co.
@@ -65,13 +69,6 @@ WORKDIR /app
 COPY backend/alembic.ini ./
 COPY backend/app ./app
 
-# Release-matched BM25 index. `/api/health` counts a missing bm25.pkl as a CORE dependency being
-# down, so an image built without it boots straight into 503 and Render never routes traffic to
-# it. Failing the BUILD is strictly better than shipping that. The artifact is git-ignored
-# (it is rebuilt from the corpus every release), so CI's `index` job produces it and drops it
-# here; locally, `make bm25`.
-COPY docker/bm25.pkl ./app/data/bm25.pkl
-
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
@@ -90,3 +87,19 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health/live',timeout=4).status==200 else 1)"
 
 ENTRYPOINT ["entrypoint.sh"]
+
+# ---------------------------------------------------------------- release ----
+# The default (last) stage, and the only one CI ever pushes. It differs from `runtime` by exactly
+# one thing: a release-matched BM25 index baked in.
+#
+# /api/health counts a missing bm25.pkl as a CORE dependency being down, so an image built without
+# one boots straight into 503 and the platform never routes traffic to it. Failing the BUILD is
+# strictly better than shipping that — which is why this COPY has no fallback. The artifact is
+# git-ignored (it is rebuilt from the corpus every release), so CI's `index` job produces it and
+# drops it here.
+#
+# `docker-compose.yml` builds `target: runtime` instead and bind-mounts the host's
+# backend/app/data, so the local stack comes up with whatever corpus you have already indexed —
+# no staging step, and re-indexing on the host does not need an image rebuild.
+FROM runtime AS release
+COPY docker/bm25.pkl ./app/data/bm25.pkl

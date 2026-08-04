@@ -43,7 +43,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       - name: Run migrations
         working-directory: backend
@@ -104,7 +104,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,ingestion]"
 
       - name: Run migrations
         working-directory: backend
@@ -173,7 +173,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,ingestion]"
 
       - name: Run migrations
         working-directory: backend
@@ -246,7 +246,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       - name: Run migrations
         working-directory: backend
@@ -324,7 +324,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       - name: Run migrations
         working-directory: backend
@@ -396,7 +396,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       - name: Run migrations
         working-directory: backend
@@ -470,7 +470,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       - name: Run migrations
         working-directory: backend
@@ -546,7 +546,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       - name: Run migrations
         working-directory: backend
@@ -624,7 +624,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       - name: Run migrations
         working-directory: backend
@@ -686,7 +686,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,ingestion]"
       # Config (and the reason for every escape hatch) lives in backend/pyproject.toml
       # [tool.mypy]. Not --strict: annotating the whole pre-existing codebase is a refactor, not a
       # deployment feature.
@@ -741,7 +741,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       # The other jobs only ever run `upgrade head`, so a broken `downgrade()` would sit unnoticed
       # until the 3am rollback in docs/runbook.md — the one moment it must work. This is the job
@@ -791,7 +791,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,serving]"
 
       # Generalises the per-feature "this feature adds no migration" guards: any model change
       # without a matching Alembic revision fails here, whichever feature made it. F15 itself adds

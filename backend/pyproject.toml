@@ -16,22 +16,14 @@ dependencies = [
     "passlib[bcrypt]==1.7.4",
     "bcrypt==4.0.1",  # passlib 1.7.4 doesn't support bcrypt>=4.1 (removed __about__.__version__)
     "httpx==0.28.1",  # also used directly by app.ingestion.downloader (F1)
-    # --- ingestion (F1) ---
-    "langchain-community==0.4.2",  # document loaders: PyMuPDF/Unstructured*/BSHTML
+    # --- shared LangChain core (F1 loaders, F3 LCEL, F6 cross-encoder) ---
+    "langchain-community==0.4.2",  # document loaders (F1) + HuggingFaceCrossEncoder (F6)
     "langchain-core==1.4.9",       # Document schema
-    "unstructured[docx,pptx,xlsx,md]==0.24.1",
-    "pymupdf==1.28.0",
-    "beautifulsoup4==4.15.0",
-    "lxml==6.1.1",
     "aiofiles==25.1.0",
     "tenacity==9.1.4",
     "structlog==26.1.0",
-    "python-docx==1.2.0",
-    "python-pptx==1.0.2",
-    "openpyxl==3.1.5",
-    "pandas==2.3.3",  # xlsx row-wise iteration + fixture generation
-    # ocrmypdf / libreoffice are external CLI binaries invoked via subprocess in the Docker
-    # ingestion image (design.md §4) — not Python-importable deps, not installed here.
+    # The document-parsing stack (unstructured, pymupdf, python-docx/pptx, openpyxl, pandas, bs4,
+    # lxml) lives in the `ingestion` extra, NOT here — see the note on that extra below.
     # --- Chunking & Indexing (F2) ---
     "tiktoken==0.13.0",
     "rank-bm25==0.2.2",
@@ -41,7 +33,7 @@ dependencies = [
     # --- Baseline RAG chain (F3) ---
     # langchain-core (LCEL: RunnableLambda, ChatPromptTemplate, StrOutputParser) is already
     # pinned above under F1 ingestion — reused, not re-pinned.
-    "langfuse==2.60.9",  # optional at runtime — observability.langfuse_handler() is None-safe
+    # langfuse lives in the `serving` extra — see the note there.
     # --- Evaluation harness (F4) ---
     # RAGAS judge suite. 0.4.3 resolves cleanly against langchain-core 1.4.9 (no downgrade), but its
     # `ragas.llms.base` unconditionally imports `langchain_community.chat_models.vertexai`, a path the
@@ -83,6 +75,36 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# --- The langfuse / unstructured split (F15) --------------------------------
+# These two can NEVER be installed together:
+#     langfuse 2.60.9     requires wrapt<2.0,>=1.14
+#     unstructured 0.24.1 requires wrapt<3.0.0,>=2.1.1
+# The conflict was latent for as long as both were top-level deps, because no local venv ever had
+# langfuse in it (the code is None-safe without it) — it only surfaces on a clean-room install,
+# i.e. the Docker build and CI.
+#
+# The resolution is not a version bump but the observation that NO SINGLE ENVIRONMENT NEEDS BOTH:
+#   * the serving app never imports app.ingestion or unstructured (verified with an import graph
+#     from app.main) — it only wants langfuse;
+#   * ingestion and the test suite want the parsing stack and never exercise langfuse.
+# Splitting them therefore costs nothing and also strips spacy/numba/nltk out of the serving
+# image, which is the "keep the serving image lean" goal F15 set out with anyway.
+serving = [
+    "langfuse==2.60.9",  # optional at runtime — observability.langfuse_handler() is None-safe
+]
+ingestion = [
+    "unstructured[docx,pptx,xlsx,md]==0.24.1",
+    "pymupdf==1.28.0",
+    "beautifulsoup4==4.15.0",
+    "lxml==6.1.1",
+    "python-docx==1.2.0",
+    "python-pptx==1.0.2",
+    "openpyxl==3.1.5",
+    "pandas==2.3.3",  # xlsx row-wise iteration + fixture generation
+    # ocrmypdf / libreoffice are external CLI binaries invoked via subprocess in the Docker
+    # ingestion image (design.md §3) — not Python-importable deps, not installed here.
+]
+
 dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.25.0",

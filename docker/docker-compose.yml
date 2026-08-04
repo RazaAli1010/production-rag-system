@@ -29,20 +29,26 @@ services:
       timeout: 5s
       retries: 10
 
-  # F15. `make db-up` still starts only postgres+redis, so the bare-metal workflow
-  # (uvicorn on the host, `make migrate`) is unchanged for anyone who never touches this service.
-  #
-  # Needs `docker/bm25.pkl` in the build context first — run `make bm25`. The Dockerfile COPYs it
-  # because /api/health treats a missing BM25 index as a core dependency being down.
+  # F15. Starting only the datastores is still possible —
+  # `docker compose up postgres redis` — so the bare-metal workflow (uvicorn on the host) is
+  # unchanged for anyone who never touches this service.
   api:
     build:
       context: ..                        # repo root: the Dockerfile COPYs backend/…
       dockerfile: docker/Dockerfile.serving
+      # NOT the default `release` stage: that one bakes a release-matched bm25.pkl and fails the
+      # build without it. Locally the index you already have on disk is the one you want, and it
+      # arrives via the bind mount below — so `docker compose up` needs no staging step.
+      target: runtime
       args:
         APP_VERSION: dev
     restart: unless-stopped
     env_file:
       - ../backend/.env                  # secrets: OPENAI_API_KEY, PINECONE_*, JWT_SECRET, ADMIN_*
+    volumes:
+      # The live corpus: bm25.pkl + index_manifest.json. Re-index on the host and the container
+      # picks it up on restart — no image rebuild.
+      - ../backend/app/data:/app/app/data
     environment:
       # These OVERRIDE the host-oriented URLs in .env with the compose network names. Env
       # precedence over env_file is what lets one .env serve both the bare-metal and the
@@ -56,6 +62,35 @@ services:
         condition: service_healthy       # the entrypoint runs `alembic upgrade head` immediately
       redis:
         condition: service_healthy
+
+  # F15. The Vite dev server, so `docker compose up` is the whole stack and not just its backend.
+  # Deliberately the DEV server, not a production build behind nginx: the point of the local stack
+  # is to work on it, and a static bundle would mean a rebuild per keystroke. Vercel builds the
+  # production bundle; nothing here needs to reproduce that.
+  frontend:
+    image: node:22-slim
+    working_dir: /app
+    environment:
+      # The proxy runs server-side, inside this container, so it targets the compose network name.
+      # The BROWSER still only ever talks to localhost:5173 — which is the entire point: one
+      # origin, so the SameSite=Lax anonymous session cookie keeps working exactly as in prod
+      # behind Vercel's rewrites.
+      VITE_API_BASE_URL: http://api:8000
+    volumes:
+      - ../frontend:/app
+      # Anonymous volume so the container keeps its own Linux-built node_modules. Without it the
+      # bind mount above shadows them with the host's Windows/macOS build and esbuild dies with
+      # a wrong-platform binary error.
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    # `npm ci` only when the volume is empty — it is idempotent but takes ~40s, and paying that on
+    # every `up` is the difference between a one-command stack and an annoying one.
+    command: >-
+      sh -c "[ -e node_modules/.package-lock.json ] || npm ci --no-audit --no-fund;
+             npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
 
 volumes:
   postgres-data:

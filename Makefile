@@ -52,6 +52,8 @@ image:
 		--build-arg APP_VERSION=$$(git rev-parse --short HEAD) \
 		-t campus-rag-api:local .
 
+# Thin alias — `docker compose -f docker/docker-compose.yml up --build` is the real command, and
+# it works without make (which is not installed by default on Windows).
 up:
 	docker compose -f docker/docker-compose.yml up --build
 
