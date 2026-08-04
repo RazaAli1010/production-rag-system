@@ -1,6 +1,6 @@
 import pytest
 
-PW = "probation123"
+PW = "Probation123"
 EMAIL = "s@pu.edu.pk"
 
 
@@ -31,6 +31,10 @@ async def test_duplicate_registration_is_409(client):
     r = await register(client)
 
     assert r.status_code == 409
+    # The envelope, not a bare {detail} — the UI renders `message` verbatim, so a duplicate signup
+    # must not fall back to the per-status copy.
+    assert r.json()["error"]["type"] == "duplicate_email"
+    assert r.json()["error"]["message"] == "Email already registered"
 
 
 @pytest.mark.parametrize(
@@ -39,13 +43,24 @@ async def test_duplicate_registration_is_409(client):
         {"email": EMAIL, "password": "short"},
         {"email": "not-an-email", "password": PW},
         {"email": EMAIL, "password": PW, "role": "admin"},
+        {"email": EMAIL, "password": "probation123"},
+        {"email": EMAIL, "password": "PROBATION123"},
+        {"email": EMAIL, "password": "ProbationOnly"},
     ],
-    ids=["short_password", "bad_email", "role_injection"],
+    ids=["short_password", "bad_email", "role_injection", "no_upper", "no_lower", "no_digit"],
 )
 async def test_register_validation_is_422(client, payload):
     r = await client.post("/api/auth/register", json=payload)
 
     assert r.status_code == 422
+
+
+async def test_weak_password_422_says_what_is_missing(client):
+    r = await client.post("/api/auth/register", json={"email": EMAIL, "password": "probation123"})
+
+    # Renderable as-is: no "Value error, " prefix, and it names the unmet rule.
+    msg = r.json()["error"]["detail"][0]["msg"]
+    assert msg == "Password needs an uppercase letter."
 
 
 async def test_token_returns_a_bearer_pair(client):
@@ -65,7 +80,7 @@ async def test_token_with_bad_password_is_401_with_www_authenticate(client):
     r = await login(client, password="wrongpassword")
 
     assert r.status_code == 401
-    assert r.json()["detail"] == "Incorrect email or password"
+    assert r.json()["error"]["message"] == "Incorrect email or password"
     assert r.headers["www-authenticate"] == "Bearer"
 
 
@@ -76,7 +91,12 @@ async def test_unknown_email_is_indistinguishable_from_a_wrong_password(client):
     unknown = await login(client, email="nobody@pu.edu.pk")
 
     assert wrong.status_code == unknown.status_code == 401
-    assert wrong.json() == unknown.json()
+    # request_id is per-request by design; everything that could identify WHICH check failed
+    # must match.
+    def body(r):
+        return {k: v for k, v in r.json()["error"].items() if k != "request_id"}
+
+    assert body(wrong) == body(unknown)
 
 
 async def test_me_returns_the_profile(client):
@@ -94,7 +114,7 @@ async def test_me_without_credentials_is_401(client):
     r = await client.get("/api/auth/me")
 
     assert r.status_code == 401
-    assert r.json()["detail"] == "Could not validate credentials"
+    assert r.json()["error"]["message"] == "Could not validate credentials"
 
 
 async def test_me_with_a_garbage_token_is_401(client):

@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.db.models import User
 
-PW = "probation123"
+PW = "Probation123"
 EMAIL = "s@pu.edu.pk"
 
 
@@ -56,7 +56,7 @@ async def test_no_secret_reaches_the_logs_across_the_whole_flow(client, logs, se
 async def test_rejection_reason_is_logged_but_not_returned(client, logs):
     r = await client.get("/api/auth/me", headers={"Authorization": "Bearer not.a.token"})
 
-    assert r.json()["detail"] == "Could not validate credentials"
+    assert r.json()["error"]["message"] == "Could not validate credentials"
     rejects = [e for e in logs.entries if e.get("event") == "auth.reject"]
     assert rejects and rejects[-1]["reason"] == "bad_token"
 

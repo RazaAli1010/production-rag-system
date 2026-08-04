@@ -17,7 +17,7 @@ from app.auth.schemas import RegisterRequest
 from app.db.enums import UserRole
 from app.db.models import User
 
-PW = "probation123"
+PW = "Probation123"
 
 ACTORS = ["anonymous", "student", "admin", "api_key"]
 

@@ -9,6 +9,12 @@ const Sources = lazy(() => import("./pages/Sources").then((m) => ({ default: m.S
 const Admin = lazy(() => import("./pages/Admin").then((m) => ({ default: m.Admin })));
 const Login = lazy(() => import("./pages/Login").then((m) => ({ default: m.Login })));
 const Register = lazy(() => import("./pages/Login").then((m) => ({ default: m.Register })));
+const ForgotPassword = lazy(() =>
+  import("./pages/Login").then((m) => ({ default: m.ForgotPassword })),
+);
+const ResetPassword = lazy(() =>
+  import("./pages/Login").then((m) => ({ default: m.ResetPassword })),
+);
 
 /**
  * AC-35: this guard is presentation only. `/internal/*` carries a router-level
@@ -30,6 +36,8 @@ export function App() {
           <Route path="/sources" element={<Sources />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route
             path="/admin"
             element={
