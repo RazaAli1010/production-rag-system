@@ -3,6 +3,7 @@ BAD_CREDENTIALS = "Incorrect email or password"
 LOCKOUT = "Too many failed attempts. Try again later."
 FORBIDDEN = "Insufficient permissions"
 DUPLICATE_EMAIL = "Email already registered"
+RESET_INVALID = "This reset link is invalid or has expired. Request a new one."
 
 
 class AuthError(Exception):

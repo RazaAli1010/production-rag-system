@@ -166,8 +166,15 @@ export const handlers = [
     }),
   ),
 
-  http.post("/api/auth/register", () =>
-    HttpResponse.json(
+  http.post("/api/auth/register", async ({ request }) => {
+    const { email } = (await request.json()) as { email: string };
+    if (email === "taken@pu.edu.pk") {
+      return HttpResponse.json(
+        { error: { type: "duplicate_email", message: "Email already registered" } },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json(
       {
         id: "99999999-9999-9999-9999-999999999999",
         email: "student@pucit.edu.pk",
@@ -176,8 +183,26 @@ export const handlers = [
         created_at: new Date().toISOString(),
       },
       { status: 201 },
-    ),
-  ),
+    );
+  }),
+
+  http.post("/api/auth/forgot-password", () => new HttpResponse(null, { status: 202 })),
+
+  http.post("/api/auth/reset-password", async ({ request }) => {
+    const { token } = (await request.json()) as { token: string };
+    if (token === "expired") {
+      return HttpResponse.json(
+        {
+          error: {
+            type: "bad_reset_token",
+            message: "This reset link is invalid or has expired. Request a new one.",
+          },
+        },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
 
   http.post("/api/auth/logout", () => new HttpResponse(null, { status: 204 })),
 

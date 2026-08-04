@@ -6,21 +6,26 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.email import send_reset_link
 from app.auth.schemas import Principal, RegisterRequest
 from app.core.exceptions import (
     BAD_CREDENTIALS,
     DUPLICATE_EMAIL,
     GENERIC,
     LOCKOUT,
+    RESET_INVALID,
     AuthError,
 )
 from app.core.security import (
     api_key_hash,
+    decode_reset,
     decode_token,
     encode_access,
     encode_refresh,
+    encode_reset,
     hash_password,
     new_api_key,
+    reset_subject,
     verify_password,
 )
 from app.db.enums import UserRole
@@ -107,6 +112,52 @@ async def authenticate(
     await session.commit()
     logger.info("auth.login", user_id=str(user.id))
     return access, refresh
+
+
+def _reset_key(email: str) -> str:
+    # Namespaced so reset throttling shares the login_attempts table without touching the login
+    # lockout counter — otherwise anyone could lock an account out by spamming "forgot password".
+    return f"reset:{email}"
+
+
+async def request_reset(session: AsyncSession, email: str, *, settings) -> None:
+    """Always returns cleanly. Whether the address exists, is throttled, or the provider is down,
+    the endpoint says the same thing — a reset form must not be an account-enumeration oracle."""
+    if await _recent_failures(session, _reset_key(email), settings=settings) >= (
+        settings.RESET_MAX_PER_WINDOW
+    ):
+        logger.info("auth.reset_throttled")
+        return
+
+    user = await session.scalar(select(User).where(User.email == email))
+    session.add(LoginAttempt(email_or_ip=_reset_key(email), success=False))
+    await session.commit()
+    if user is None or not user.is_active:
+        logger.info("auth.reset_requested", found=False)
+        return
+
+    token = encode_reset(user.id, user.hashed_password, settings=settings)
+    link = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/reset-password?token={token}"
+    logger.info("auth.reset_requested", found=True, user_id=str(user.id))
+    await send_reset_link(user.email, link, settings=settings)
+
+
+async def reset_password(session: AsyncSession, token: str, password: str, *, settings) -> None:
+    user = await session.get(User, reset_subject(token))
+    if user is None or not user.is_active:
+        raise AuthError(400, RESET_INVALID, reason="unknown_reset_user")
+
+    decode_reset(token, user.hashed_password, settings=settings)
+    user.hashed_password = await hash_password(password, settings=settings)
+    # A reset is the remedy for "someone else is in my account", so every existing session dies
+    # with it. The token itself is already dead: it was signed against the old hash.
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=_now())
+    )
+    await session.commit()
+    logger.info("auth.reset_completed", user_id=str(user.id))
 
 
 async def rotate_refresh(

@@ -12,7 +12,7 @@ from app.db.models import ApiKey, LoginAttempt, RefreshToken, User
 
 from .conftest import make_settings
 
-PW = "probation123"
+PW = "Probation123"
 
 
 async def _register(session, settings, email="s@pu.edu.pk") -> User:
