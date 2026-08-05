@@ -163,7 +163,9 @@ async def rewrite_query(query: str, memory: MemoryContext | None, settings) -> R
         llm = _build_rewrite_llm(settings)
         messages = _build_messages(query, memory)
         async with asyncio.timeout(settings.REWRITE_TIMEOUT_S):
-            msg = await llm.ainvoke(messages)
+            # Traced under the same Langfuse client as the generate chain, so the rewrite's cost
+            # and latency show up as a sibling generation rather than an invisible OpenAI call.
+            msg = await llm.ainvoke(messages, config=observability.langfuse_config(None, settings))
         # AIMessage.content is `str | list[...]` (multimodal); a text-only chat model always
         # returns str. Narrow explicitly rather than assume.
         content = msg.content if isinstance(msg.content, str) else str(msg.content)

@@ -231,7 +231,7 @@ jobs:
       PINECONE_API_KEY: pc-ci-only-placeholder
       PINECONE_INDEX: campus-rag-ci
       # LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY deliberately unset — Langfuse is optional
-      # (observability.langfuse_handler() returns None without them), so CI never needs real
+      # (observability.langfuse_config() returns {} without them), so CI never needs real
       # Langfuse credentials to go green.
 
     steps:

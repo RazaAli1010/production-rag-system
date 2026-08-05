@@ -341,8 +341,7 @@ async def _pipeline_events(
                    "language_directive": language_directive}
     llm = build_llm(settings)
     chain = build_generate_chain(llm)
-    handler = observability.langfuse_handler(session_id=session_id, settings=settings)
-    config = {"callbacks": [handler]} if handler else {}
+    config = observability.langfuse_config(session_id, settings)
 
     answer_text = ""
     tokens_out = 0

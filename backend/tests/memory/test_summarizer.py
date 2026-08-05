@@ -20,7 +20,9 @@ class _FakeLLM:
     def __init__(self):
         self.seen = None
 
-    async def ainvoke(self, messages):
+    # `config` mirrors the real `Runnable.ainvoke` signature — the call site threads the Langfuse
+    # callback config through it.
+    async def ainvoke(self, messages, config=None):
         self.seen = messages
         return _FakeMsg("extended summary")
 
@@ -61,7 +63,7 @@ async def test_refused_turn_is_tagged(monkeypatch):
 
 async def test_llm_failure_propagates(monkeypatch):
     class _Boom:
-        async def ainvoke(self, messages):
+        async def ainvoke(self, messages, config=None):
             raise RuntimeError("provider 500")
 
     monkeypatch.setattr(summarizer, "_build_llm", lambda s: _Boom())

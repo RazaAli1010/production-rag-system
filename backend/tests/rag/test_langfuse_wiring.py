@@ -45,7 +45,7 @@ async def _fake_retrieve(*a, **kw):
 
 class FakeCallbackHandler(BaseCallbackHandler):
     """A real `BaseCallbackHandler` subclass (langchain checks for attributes like `run_inline`
-    that a plain duck-typed object wouldn't have) standing in for `langfuse.callback.
+    that a plain duck-typed object wouldn't have) standing in for `langfuse.langchain.
     CallbackHandler` so this test doesn't need the real langfuse package installed."""
 
     def __init__(self, **kwargs):
@@ -54,10 +54,10 @@ class FakeCallbackHandler(BaseCallbackHandler):
 
 async def test_langfuse_callback_attached_to_astream_events_config(monkeypatch, session):
     fake_pkg = types.ModuleType("langfuse")
-    fake_callback_mod = types.ModuleType("langfuse.callback")
-    fake_callback_mod.CallbackHandler = FakeCallbackHandler
+    fake_langchain_mod = types.ModuleType("langfuse.langchain")
+    fake_langchain_mod.CallbackHandler = FakeCallbackHandler
     monkeypatch.setitem(sys.modules, "langfuse", fake_pkg)
-    monkeypatch.setitem(sys.modules, "langfuse.callback", fake_callback_mod)
+    monkeypatch.setitem(sys.modules, "langfuse.langchain", fake_langchain_mod)
 
     await _seed_one_chunk(session)
     monkeypatch.setattr(retriever, "retrieve", _fake_retrieve)

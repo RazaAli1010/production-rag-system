@@ -41,7 +41,7 @@ def _f3_settings_env(monkeypatch):
 @pytest.fixture(autouse=True)
 def _langfuse_absent(monkeypatch):
     """Confirms F3's default posture: no Langfuse creds configured. `observability.
-    langfuse_handler()` must return `None` (no callback attached) in this state — Langfuse is
+    langfuse_config()` must return `{}` (no callback attached) in this state — Langfuse is
     optional, never a hard boot requirement (see Settings LANGFUSE_* defaults)."""
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
