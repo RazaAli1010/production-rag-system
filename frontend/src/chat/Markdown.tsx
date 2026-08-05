@@ -40,7 +40,10 @@ function renderInline(
       case "em":
         return <em key={key}>{p.value}</em>;
       case "cite": {
-        const c = citations[p.n - 1];
+        // By marker, NOT by position: the server sends only the cited chunks, so an answer whose
+        // first marker is `[2]` puts that citation at index 0. Positional lookup silently opened
+        // the wrong source.
+        const c = citations.find((x) => x.marker === p.n);
         // AC-8: a marker with no matching citation is plain text, never a dead control.
         if (!c) return <Fragment key={key}>[{p.n}]</Fragment>;
         return <CitationChip key={key} n={p.n} citation={c} onOpen={onOpen} />;

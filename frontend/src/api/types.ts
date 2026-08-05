@@ -39,6 +39,11 @@ export interface Citation {
   chunk_id: string;
   doc_id: string;
   title: string;
+  /**
+   * The `[n]` this citation resolves. The array is compacted server-side, so look up by this —
+   * never by array position. `null` on pre-LLM refusal suggestions (no marker points at them).
+   */
+  marker: number | null;
   section_heading: string | null;
   page_start: number | null;
   page_end: number | null;
