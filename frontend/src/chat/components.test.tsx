@@ -14,6 +14,7 @@ import type { TrailStage } from "./types";
 const cite = (o: Partial<Citation> = {}): Citation => ({
   chunk_id: "pu-calendar-2023:41",
   doc_id: "pu-calendar-2023",
+  marker: 1,
   title: "PU Calendar, Volume II",
   section_heading: "Probation",
   page_start: 112,
@@ -126,6 +127,21 @@ describe("Markdown citations", () => {
     render(<Markdown text="See [9] for detail." citations={[cite()]} onOpenCitation={open} />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByText(/\[9\]/)).toBeInTheDocument();
+  });
+
+  it("resolves by marker, not by list position", async () => {
+    // The server sends only the CITED chunks, so an answer whose markers are [2] and [4] arrives
+    // as a two-element array. Positional lookup opened the [4] source from the [2] chip.
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const two = cite({ marker: 2, doc_id: "hec-plagiarism-policy", title: "HEC Plagiarism Policy" });
+    const four = cite({ marker: 4, doc_id: "hec-turnitin-sops", title: "HEC Turnitin SOPs" });
+    render(<Markdown text="Limit is 19% [2] per the SOPs [4]." citations={[two, four]} onOpenCitation={onOpen} />);
+
+    await user.click(screen.getByRole("button", { name: /source 2/i }));
+    expect(onOpen).toHaveBeenCalledWith(two, 2);
+    await user.click(screen.getByRole("button", { name: /source 4/i }));
+    expect(onOpen).toHaveBeenCalledWith(four, 4);
   });
 
   it("holds back a partial marker while streaming", () => {

@@ -25,6 +25,7 @@ const tokens = (text: string) =>
 export const CITATION: Citation = {
   chunk_id: "pu-calendar-2023:41",
   doc_id: "pu-calendar-2023",
+  marker: 1,
   title: "University of the Punjab Calendar, Volume II",
   section_heading: "Probation and Removal from Rolls",
   page_start: 112,

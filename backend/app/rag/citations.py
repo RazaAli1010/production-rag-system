@@ -39,18 +39,18 @@ async def parse_citations(
     if not marker_numbers:
         return []
 
-    chunk_ids = [chunks[n - 1].chunk_id for n in marker_numbers]
+    cited = [(n, chunks[n - 1].chunk_id) for n in marker_numbers]
 
     stmt = (
         select(ChunkRow, DocRow)
         .join(DocRow, ChunkRow.doc_id == DocRow.doc_id)
-        .where(ChunkRow.chunk_id.in_(chunk_ids))
+        .where(ChunkRow.chunk_id.in_([chunk_id for _, chunk_id in cited]))
     )
     result = await session.execute(stmt)
     rows = {chunk_row.chunk_id: (chunk_row, doc_row) for chunk_row, doc_row in result.all()}
 
     citations = []
-    for chunk_id in chunk_ids:
+    for n, chunk_id in cited:
         pair = rows.get(chunk_id)
         if pair is None:
             continue  # chunk vanished from Postgres since retrieval — skip, don't crash
@@ -60,6 +60,7 @@ async def parse_citations(
                 chunk_id=chunk_row.chunk_id,
                 doc_id=doc_row.doc_id,
                 title=doc_row.title,
+                marker=n,
                 section_heading=chunk_row.section_heading,
                 page_start=chunk_row.page_start,
                 page_end=chunk_row.page_end,

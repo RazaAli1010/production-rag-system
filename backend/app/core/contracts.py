@@ -66,6 +66,10 @@ class Citation(BaseModel):
     chunk_id: str
     doc_id: str
     title: str
+    # The `[n]` this citation resolves. The list is compacted (only cited chunks, first-appearance
+    # order), so consumers MUST match on this, never on list position — `[2]` is routinely the
+    # first element. `None` on pre-LLM refusal suggestions, which no marker points at.
+    marker: int | None = None
     section_heading: str | None = None
     page_start: int | None = None
     page_end: int | None = None

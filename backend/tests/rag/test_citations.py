@@ -54,6 +54,18 @@ async def test_parse_citations_resolves_valid_markers_in_one_query(session):
     assert all(c.doc_id == "d" and c.title == "Doc Title" for c in citations)
 
 
+async def test_parse_citations_carries_the_marker_number(session):
+    """The returned list is COMPACTED to the cited chunks, so position != marker. Consumers
+    (F14's `Markdown`) must match on `.marker`; without it, an answer citing [2] and [4] mapped
+    `[2]` onto the `[4]` source."""
+    await _seed(session, n=4)
+    chunks = [_retrieved(i) for i in range(4)]
+
+    citations = await parse_citations("Cites [2] and [4].", chunks, session)
+
+    assert [(c.marker, c.chunk_id) for c in citations] == [(2, "d:1"), (4, "d:3")]
+
+
 async def test_parse_citations_quote_matches_extract_quote_of_stored_text(session):
     await _seed(session, n=1)
     chunks = [_retrieved(0)]
