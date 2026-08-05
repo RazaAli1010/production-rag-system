@@ -1,10 +1,14 @@
-"""Langfuse callback (optional, None-safe) + cost logging (design.md §8, AC-25/26).
+"""Langfuse callback (optional, no-op-safe) + cost logging (design.md §8, AC-25/26).
 
-`langfuse_handler` takes `settings` explicitly (design.md §4's one-arg signature is adjusted
-here, same as `retriever.retrieve`/`refusal.pre_llm_gate`) because whether it returns a handler
+`langfuse_config` takes `settings` explicitly (design.md §4's one-arg signature is adjusted
+here, same as `retriever.retrieve`/`refusal.pre_llm_gate`) because whether it returns a callback
 is entirely config-dependent (`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` present or not) — the
 module-level `Settings()` singleton is constructed once at import time, so it can't reflect
 per-test env overrides the way an explicit, freshly-constructed `Settings` instance can.
+
+langfuse>=4 splits what the v2 handler took in one constructor: CREDENTIALS live on a process-wide
+client (`init_langfuse`, once, from the app lifespan) and PER-TRACE attributes ride in the
+invocation `config["metadata"]` under `langfuse_*` keys. Hence two functions where there was one.
 """
 
 import structlog
@@ -16,27 +20,69 @@ from app.observability.metrics import record_cost
 logger = structlog.get_logger(__name__)
 
 
-def langfuse_handler(session_id: str | None, settings):
-    """Returns a Langfuse `CallbackHandler` when both Langfuse keys are configured, else `None`
-    — Langfuse is optional, never a hard boot requirement (Settings `LANGFUSE_*` default to
-    `None`). Callers attach it via `config={"callbacks": [h] if h else []}` (AC-25)."""
+def init_langfuse(settings) -> None:
+    """Construct the process-wide Langfuse client, once, at startup. No-op (with a log line saying
+    which) when the keys are absent or the package isn't installed — Langfuse is optional and never
+    a hard boot requirement.
+
+    This has to be explicit rather than left to the SDK's own env-var pickup: pydantic-settings
+    reads `.env` into `Settings` WITHOUT exporting to `os.environ`, so a `.env`-only configuration
+    is invisible to `Langfuse()`'s auto-config and every trace would be silently dropped."""
     if settings.LANGFUSE_PUBLIC_KEY is None or settings.LANGFUSE_SECRET_KEY is None:
-        return None
+        logger.info("rag.langfuse_disabled", reason="keys_not_configured")
+        return
     try:
-        from langfuse.callback import CallbackHandler
+        from langfuse import Langfuse
     except ImportError:
         logger.warning("rag.langfuse_not_installed")
-        return None
-    return CallbackHandler(
+        return
+    Langfuse(
         public_key=settings.LANGFUSE_PUBLIC_KEY.get_secret_value(),
         secret_key=settings.LANGFUSE_SECRET_KEY.get_secret_value(),
-        host=settings.LANGFUSE_HOST,
-        session_id=session_id,
-        # F13: env tag + request-id correlation, so one request_id resolves to its trace (AC-1).
-        trace_name="ask",
-        tags=[settings.APP_ENV, settings.APP_VERSION],  # F15: which release produced this trace
-        metadata={"request_id": request_id_var.get()},
+        base_url=settings.LANGFUSE_BASE_URL,
+        environment=settings.APP_ENV,
+        release=settings.APP_VERSION,  # F15: which release produced this trace
     )
+    logger.info("rag.langfuse_enabled", base_url=settings.LANGFUSE_BASE_URL,
+                environment=settings.APP_ENV, release=settings.APP_VERSION)
+
+
+def flush_langfuse() -> None:
+    """Blocking — call via `anyio.to_thread.run_sync` from the async lifespan teardown. The SDK
+    batches spans on a background thread, so without this the tail of in-flight traces dies with
+    the process on shutdown."""
+    try:
+        from langfuse import get_client
+    except ImportError:
+        return
+    get_client().flush()
+
+
+def langfuse_config(session_id: str | None, settings) -> dict:
+    """The LCEL `config` to pass at an LLM call site: `{"callbacks": [...], "metadata": {...}}` when
+    Langfuse is configured, else `{}` (AC-25). Callers pass the result straight through as
+    `config=`, so an unconfigured deployment threads an empty dict and behaves exactly as before.
+
+    `CallbackHandler()` takes no credentials in v4 — it resolves the client `init_langfuse` built.
+    Trace attributes travel as `langfuse_*` metadata keys instead of constructor kwargs; plain
+    `request_id` stays a normal metadata field so the runbook's `metadata.request_id` filter keeps
+    resolving a request to its trace (AC-1)."""
+    if settings.LANGFUSE_PUBLIC_KEY is None or settings.LANGFUSE_SECRET_KEY is None:
+        return {}
+    try:
+        from langfuse.langchain import CallbackHandler
+    except ImportError:
+        logger.warning("rag.langfuse_not_installed")
+        return {}
+    # ponytail: one trace per LLM call, not one trace per request with the rewrite/summarizer as
+    # child spans. v4 is OTel-based, so nesting means holding a `start_as_current_span` open across
+    # the pipeline's async-generator yields — context propagation there is exactly the fiddly part.
+    # The shared `request_id` (the correlation key `docs/runbook.md` already documents) groups them
+    # meanwhile; upgrade to a wrapping span if the flat view stops being enough.
+    metadata = {"langfuse_trace_name": "ask", "request_id": request_id_var.get()}
+    if session_id is not None:
+        metadata["langfuse_session_id"] = session_id
+    return {"callbacks": [CallbackHandler()], "metadata": metadata}
 
 
 async def log_llm_cost(model: str, tokens_in: int, tokens_out: int = 0) -> None:

@@ -52,9 +52,13 @@ class FakeRewriteLLM:
         self.delay = delay
         self.usage = usage if usage is not None else {"input_tokens": 10, "output_tokens": 5}
         self.calls = []
+        self.configs = []
 
-    async def ainvoke(self, messages):
+    # `config` mirrors the real `Runnable.ainvoke` signature — the call site passes the Langfuse
+    # callback config through it, and a fake that rejected it would fail the call, not the trace.
+    async def ainvoke(self, messages, config=None):
         self.calls.append(messages)
+        self.configs.append(config)
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.exc:

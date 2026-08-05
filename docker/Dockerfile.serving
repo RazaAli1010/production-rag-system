@@ -35,9 +35,9 @@ RUN TORCH_PIN=$(grep -oE '"torch==[^"]+"' pyproject.toml | tr -d '"') \
     && pip install --index-url https://download.pytorch.org/whl/cpu "$TORCH_PIN"
 
 # `.[serving]` — NOT `.` and NOT `.[ingestion]`. The serving app never imports app.ingestion or
-# unstructured (verified by import graph), and unstructured's wrapt>=2.1.1 is irreconcilable with
-# langfuse's wrapt<2.0, so installing the parsing stack here would make Langfuse uninstallable
-# AND drag spacy/numba/nltk into an image that never calls them.
+# unstructured (verified by import graph), so installing the parsing stack here would only drag
+# spacy/numba/nltk into an image that never calls them. (The old reason — unstructured's
+# wrapt>=2.1.1 vs langfuse 2's wrapt<2.0 — no longer applies at langfuse 4, which allows wrapt<3.)
 # No `[dev]`, so ruff/pytest/mypy/locust never ship. torch is already satisfied in the venv, so
 # this does not reach for the CUDA build.
 RUN pip install '.[serving]'

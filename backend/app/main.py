@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 
+import anyio.to_thread
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -16,7 +17,7 @@ from app.core.middleware import RequestContextMiddleware
 from app.core.ratelimit import RateLimited
 from app.core.settings import settings
 from app.observability.logging import configure_logging
-from app.rag import rerank
+from app.rag import observability, rerank
 from app.rag.errors import ProviderError
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +37,9 @@ async def _warm_rerank() -> None:
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     configure_logging(settings)  # F13: the one structlog.configure, JSON logs + request_id (AC-7)
+    # Build the process-wide Langfuse client the per-call CallbackHandlers resolve. No-op when the
+    # keys are unset (CI/local dev); logs `rag.langfuse_enabled` when it is actually on.
+    observability.init_langfuse(settings)
     # Backgrounded, not awaited: blocking boot on the weight load would delay readiness and risk
     # the platform's health-check window. Held in a local so the task isn't GC'd mid-flight.
     warm_task = asyncio.create_task(_warm_rerank()) if settings.ENABLE_RERANK else None
@@ -46,6 +50,10 @@ async def _lifespan(app: FastAPI):
             await warm_task
     # Drop the pooled redis.asyncio clients (limiter + F9 cache share them) on shutdown.
     await redis_hot.close()
+    # Blocking network flush → off the loop. Suppressed: losing telemetry on the way out is not
+    # worth failing a shutdown over.
+    with contextlib.suppress(Exception):
+        await anyio.to_thread.run_sync(observability.flush_langfuse)
 
 
 app = FastAPI(title="CampusRAG", lifespan=_lifespan)

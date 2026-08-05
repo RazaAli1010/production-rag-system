@@ -146,7 +146,7 @@ async def test_stats_endpoint_requires_admin(client, admin):
 # --------------------------------------------------------------------------- graceful Langfuse
 # (AC-2)
 
-def test_langfuse_handler_none_when_unconfigured(api_settings):
-    from app.rag.observability import langfuse_handler
+def test_langfuse_config_empty_when_unconfigured(api_settings):
+    from app.rag.observability import langfuse_config
 
-    assert langfuse_handler(session_id=None, settings=api_settings) is None
+    assert langfuse_config(None, api_settings) == {}

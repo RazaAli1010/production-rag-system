@@ -41,8 +41,8 @@ RUN TORCH_PIN=$(grep -oE '"torch==[^"]+"' pyproject.toml | tr -d '"') \
     && test -n "$TORCH_PIN" || (echo "no torch pin found in pyproject.toml" >&2; exit 1) \
     && pip install --index-url https://download.pytorch.org/whl/cpu "$TORCH_PIN"
 
-# `.[ingestion]` — the document-parsing stack. Deliberately NOT `.[serving]`: unstructured and
-# langfuse pin incompatible wrapt ranges, and ingestion never emits a Langfuse trace.
+# `.[ingestion]` — the document-parsing stack. Deliberately NOT `.[serving]`: ingestion never
+# emits a Langfuse trace, so langfuse and its opentelemetry stack have no business in this image.
 RUN pip install '.[ingestion]'
 
 # `python -m` — so the run command is just the module path plus its flags:

@@ -28,7 +28,7 @@ def test_settings_loads_f3_defaults():
     assert "official" in s.DISCLAIMER_TEXT.lower()
     assert s.LANGFUSE_PUBLIC_KEY is None
     assert s.LANGFUSE_SECRET_KEY is None
-    assert s.LANGFUSE_HOST == "https://cloud.langfuse.com"
+    assert s.LANGFUSE_BASE_URL == "https://cloud.langfuse.com"
 
 
 def test_settings_env_overrides():

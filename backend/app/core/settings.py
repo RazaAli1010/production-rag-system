@@ -235,12 +235,17 @@ class Settings(BaseSettings):
     )
 
     # --- Langfuse observability (F3) ---
-    # Optional: absent in CI/local dev means observability.langfuse_handler() returns None (no
+    # Optional: absent in CI/local dev means observability.langfuse_config() returns {} (no
     # callback attached) rather than failing boot — Langfuse is not a hard requirement (AC-25
-    # is satisfied whenever these are configured, not unconditionally).
+    # is satisfied whenever these are configured, not unconditionally). BOTH keys are required;
+    # one alone is treated as unconfigured.
     LANGFUSE_PUBLIC_KEY: SecretStr | None = None
     LANGFUSE_SECRET_KEY: SecretStr | None = None
-    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+    # `BASE_URL`, not `HOST`: the name the langfuse>=4 SDK itself uses for this value. Regional —
+    # us.cloud.langfuse.com for a US project, or the origin of a self-hosted instance. Wrong value
+    # + valid keys = traces posted into the void, so it is worth getting right rather than
+    # defaulting past.
+    LANGFUSE_BASE_URL: str = "https://cloud.langfuse.com"
 
     # --- Deployment (F15) ---
     # Stamped at image build (`--build-arg APP_VERSION=$GITHUB_SHA`). Returned by

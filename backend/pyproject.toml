@@ -75,22 +75,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# --- The langfuse / unstructured split (F15) --------------------------------
-# These two can NEVER be installed together:
-#     langfuse 2.60.9     requires wrapt<2.0,>=1.14
-#     unstructured 0.24.1 requires wrapt<3.0.0,>=2.1.1
-# The conflict was latent for as long as both were top-level deps, because no local venv ever had
-# langfuse in it (the code is None-safe without it) — it only surfaces on a clean-room install,
-# i.e. the Docker build and CI.
+# --- The serving / ingestion split (F15) ------------------------------------
+# This split originally existed because langfuse 2.60.9 (wrapt<2.0) and unstructured 0.24.1
+# (wrapt>=2.1.1) could never be co-installed. That conflict is GONE at langfuse 4 (wrapt>=1.14,<3,
+# which overlaps unstructured's range) — the two now coexist happily, and they must, because the
+# local dev venv runs both the app and the test suite.
 #
-# The resolution is not a version bump but the observation that NO SINGLE ENVIRONMENT NEEDS BOTH:
+# The split is kept anyway, for the other reason F15 introduced it: no single environment needs
+# both, and separating them strips spacy/numba/nltk out of the serving image.
 #   * the serving app never imports app.ingestion or unstructured (verified with an import graph
 #     from app.main) — it only wants langfuse;
-#   * ingestion and the test suite want the parsing stack and never exercise langfuse.
-# Splitting them therefore costs nothing and also strips spacy/numba/nltk out of the serving
-# image, which is the "keep the serving image lean" goal F15 set out with anyway.
+#   * ingestion wants the parsing stack and never emits a Langfuse trace.
 serving = [
-    "langfuse==2.60.9",  # optional at runtime — observability.langfuse_handler() is None-safe
+    # optional at runtime — observability.langfuse_config() returns {} when it is absent.
+    # v4 is a hard floor, not a preference: the v2 API this code used (`langfuse.callback`,
+    # credentials as CallbackHandler kwargs) does not exist here, and v2 predates LangChain 1.x.
+    "langfuse==4.14.2",
 ]
 ingestion = [
     "unstructured[docx,pptx,xlsx,md]==0.24.1",

@@ -223,9 +223,16 @@ worker doubles resident memory *and* halves the cache hit rate.
 Every response carries a `request_id` (in the `meta` SSE frame, and the `X-Request-ID` header).
 From it:
 
-**Langfuse** — filter traces on `metadata.request_id = <id>`. Traces are tagged with `APP_ENV` and
-`APP_VERSION`, so you can scope to `prod` and to the exact release. The trace shows each LCEL step,
-the prompts, and token usage.
+**Langfuse** — filter traces on `metadata.request_id = <id>`. One request produces up to three
+traces (query rewrite, generation, and the memory summarizer when it fires); `request_id` is what
+groups them, so filter, don't go looking for one nested tree. Each is stamped with the client's
+`environment` (`APP_ENV`) and `release` (`APP_VERSION`), so you can scope to `prod` and to the exact
+release, and asks in a session carry its `session_id`. The trace shows each LCEL step, the prompts,
+and token usage.
+
+Nothing in Langfuse? Check the boot log: `rag.langfuse_enabled` means the client was built (the
+line carries the `base_url` it will post to), `rag.langfuse_disabled` means the keys weren't set,
+`rag.langfuse_not_installed` means the image was built without `.[serving]`.
 
 **Postgres** — the row that has every timing and cost:
 

@@ -42,7 +42,9 @@ async def extend_summary(old_summary: str | None, pending: list[Message], settin
     llm = _build_llm(settings)
     prior = old_summary or "(no summary yet)"
     human = f"Existing summary:\n{prior}\n\nNew turns to fold in:\n{_render_pending(pending)}"
-    msg = await llm.ainvoke([("system", _SYSTEM), ("human", human)])
+    # Traced like the rewrite and generate calls — summarization is real per-session spend.
+    msg = await llm.ainvoke([("system", _SYSTEM), ("human", human)],
+                            config=observability.langfuse_config(None, settings))
     # AIMessage.content is `str | list[...]`; the summariser is a text-only chat model.
     new_summary = (msg.content if isinstance(msg.content, str) else str(msg.content)).strip()
 
