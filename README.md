@@ -1,3 +1,13 @@
+<h1 align="center"><a href="https://www.loom.com/share/19ae6f8ba72d4995bdb36b3cc230a230">▶︎ Click for demo video</a></h1>
+
+<p align="center">
+  <img src="docs/screenshots/home.PNG" width="90%" alt="CampusRAG home screen">
+  <img src="docs/screenshots/question.PNG" width="90%" alt="Asking a question, live pipeline stages">
+  <img src="docs/screenshots/response.PNG" width="90%" alt="Cited answer with source chips">
+</p>
+
+---
+
 # CampusRAG
 
 **A citation-first RAG assistant over University of the Punjab regulations and HEC policies.**
