@@ -49,6 +49,9 @@ redis-data/
 *.log
 logs/
 
+# --- Local notes (personal, never pushed) ---
+INTERVIEW.md
+
 # --- OS / editor ---
 .DS_Store
 Thumbs.db
